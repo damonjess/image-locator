@@ -110,6 +110,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun askGeminiForLocation(bitmap: Bitmap) {
+        if (geminiApiKey.isBlank() || !geminiApiKey.startsWith("AIzaSy")) {
+            Toast.makeText(
+                this,
+                "Invalid Gemini API Key. Please add a valid key starting with 'AIzaSy' to local.properties",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val prompt = """
