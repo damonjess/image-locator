@@ -25,6 +25,7 @@ import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
+import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import java.util.Locale
@@ -43,12 +44,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     // Esri World Street Map (Free, reliable, no 403 blocks)
+    // Esri REST API expects /tile/{z}/{y}/{x} (row/col flipped compared to standard osmdroid z/x/y)
     private val esriStreetSource = object : XYTileSource(
         "EsriWorldStreetMap",
         0, 19, 256, ".jpg",
         arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/"),
         "© Esri, HERE, Garmin, USGS, NGA, EPA, USDA, NPS"
-    ) {}
+    ) {
+        override fun getTileURLString(pMapTileIndex: Long): String {
+            return baseUrl + MapTileIndex.getZoom(pMapTileIndex) + "/" +
+                    MapTileIndex.getY(pMapTileIndex) + "/" +
+                    MapTileIndex.getX(pMapTileIndex) + mImageFilenameEnding
+        }
+    }
 
     private val pickMedia = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
