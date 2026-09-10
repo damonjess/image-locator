@@ -3,7 +3,6 @@ package com.example.location_finder
 import android.app.AlertDialog
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Color
 import android.graphics.ImageDecoder
 import android.location.Geocoder
 import android.os.Build
@@ -22,10 +21,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.osmdroid.config.Configuration
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
-import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import java.util.Locale
@@ -34,29 +31,27 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var mapView: MapView
 
-    private val geminiApiKey = BuildConfig.GEMINI_API_KEY
+    // Uses API key from local.properties / BuildConfig if present, otherwise fallback
+    private val geminiApiKey = BuildConfig.GEMINI_API_KEY.ifEmpty { "YOUR_GEMINI_API_KEY_HERE" }
 
     private val generativeModel by lazy {
         GenerativeModel(
             modelName = "gemini-1.5-flash",
-            apiKey = geminiApiKey,
+            apiKey = geminiApiKey
         )
     }
 
-    // Esri World Street Map (Free, reliable, no 403 blocks)
-    // Esri REST API expects /tile/{z}/{y}/{x} (row/col flipped compared to standard osmdroid z/x/y)
-    private val esriStreetSource = object : XYTileSource(
-        "EsriWorldStreetMap",
-        0, 19, 256, ".jpg",
-        arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/"),
-        "© Esri, HERE, Garmin, USGS, NGA, EPA, USDA, NPS"
-    ) {
-        override fun getTileURLString(pMapTileIndex: Long): String {
-            return baseUrl + MapTileIndex.getZoom(pMapTileIndex) + "/" +
-                    MapTileIndex.getY(pMapTileIndex) + "/" +
-                    MapTileIndex.getX(pMapTileIndex) + mImageFilenameEnding
-        }
-    }
+    // The reliable OpenStreetMap source that fixes the missing patches
+    private val reliableStreetSource = object : XYTileSource(
+        "OSMStandard",
+        0, 19, 256, ".png",
+        arrayOf(
+            "https://a.tile.openstreetmap.org/",
+            "https://b.tile.openstreetmap.org/",
+            "https://c.tile.openstreetmap.org/"
+        ),
+        "© OpenStreetMap contributors"
+    ) {}
 
     private val pickMedia = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
@@ -75,32 +70,18 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         val config = Configuration.getInstance()
-        config.userAgentValue = "LocationFinderApp/1.0 (${packageName}; contact@example.com)"
         config.load(this, getSharedPreferences("osmdroid_prefs", MODE_PRIVATE))
-
-        try {
-            config.osmdroidTileCache?.deleteRecursively()
-            config.osmdroidBasePath?.deleteRecursively()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        config.tileDownloadThreads = 8
-        config.tileDownloadMaxQueueSize = 80
+        config.userAgentValue = "LocationFinderApp/1.0"
+        config.tileDownloadThreads = 4
+        config.tileDownloadMaxQueueSize = 40
 
         setContentView(R.layout.activity_main)
 
         mapView = findViewById(R.id.mapView)
 
-        // Initialize with Esri World Street Map
-        mapView.setTileSource(esriStreetSource)
+        // Lock the map to a single, stable street source
+        mapView.setTileSource(reliableStreetSource)
         mapView.setMultiTouchControls(true)
-        mapView.isTilesScaledToDpi = true
-
-        // Remove tile grid lines and set seamless background color
-        mapView.overlayManager.tilesOverlay.loadingLineColor = Color.TRANSPARENT
-        mapView.overlayManager.tilesOverlay.loadingBackgroundColor = Color.parseColor("#F2EFE9")
-
         mapView.controller.setZoom(5.0)
         mapView.controller.setCenter(GeoPoint(54.5, -2.0))
 
@@ -110,15 +91,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun askGeminiForLocation(bitmap: Bitmap) {
-        if (geminiApiKey.isBlank()) {
-            Toast.makeText(
-                this,
-                "Gemini API Key is missing. Please add your GEMINI_API_KEY to local.properties",
-                Toast.LENGTH_LONG
-            ).show()
-            return
-        }
-
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val prompt = """
@@ -139,23 +111,35 @@ class MainActivity : AppCompatActivity() {
                 val rawText = response.text?.trim() ?: ""
 
                 if (!rawText.contains("UNKNOWN_LOCATION")) {
-                    val cleanJson = rawText.removePrefix("```json").removeSuffix("```").trim()
-                    val json = JSONObject(cleanJson)
-                    val title = json.getString("title")
-                    val description = json.getString("description")
-                    val searchQuery = json.getString("search_query")
+                    
+                    // Robust parser: Ignores extra text and finds only the JSON
+                    val startIndex = rawText.indexOf('{')
+                    val endIndex = rawText.lastIndexOf('}')
 
-                    val coords = getCoordinatesNative(searchQuery)
+                    if (startIndex != -1 && endIndex != -1) {
+                        val cleanJson = rawText.substring(startIndex, endIndex + 1)
+                        val json = JSONObject(cleanJson)
+                        
+                        val title = json.getString("title")
+                        val description = json.getString("description")
+                        val searchQuery = json.getString("search_query")
 
-                    withContext(Dispatchers.Main) {
-                        if (coords != null) {
-                            plotOnMap(coords, title, description)
-                        } else {
-                            Toast.makeText(
-                                this@MainActivity,
-                                "Identified '$searchQuery', but could not map coordinates.",
-                                Toast.LENGTH_LONG
-                            ).show()
+                        val coords = getCoordinatesNative(searchQuery)
+
+                        withContext(Dispatchers.Main) {
+                            if (coords != null) {
+                                plotOnMap(coords, title, description)
+                            } else {
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    "Identified '$searchQuery', but could not map coordinates.",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(this@MainActivity, "Error: AI returned invalid format.", Toast.LENGTH_LONG).show()
                         }
                     }
                 } else {
