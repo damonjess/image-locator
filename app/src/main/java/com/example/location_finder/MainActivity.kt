@@ -110,10 +110,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun askGeminiForLocation(bitmap: Bitmap) {
-        if (geminiApiKey.isBlank() || !geminiApiKey.startsWith("AIzaSy")) {
+        if (geminiApiKey.isBlank()) {
             Toast.makeText(
                 this,
-                "Invalid Gemini API Key. Please add a valid key starting with 'AIzaSy' to local.properties",
+                "Gemini API Key is missing. Please add your GEMINI_API_KEY to local.properties",
                 Toast.LENGTH_LONG
             ).show()
             return
