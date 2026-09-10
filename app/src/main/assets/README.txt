@@ -1,0 +1,1 @@
+Place your TensorFlow Lite / MediaPipe vision model file (e.g., mobilenet_v3_small.tflite or mobilenet_v3.tflite) in this assets directory.
