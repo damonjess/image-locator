@@ -1,14 +1,15 @@
 package com.example.location_finder
 
 import android.app.AlertDialog
-import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.location.Geocoder
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.view.View
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -30,13 +31,14 @@ import java.util.Locale
 class MainActivity : AppCompatActivity() {
 
     private lateinit var mapView: MapView
+    private lateinit var loadingOverlay: FrameLayout
 
-    // Uses API key from local.properties / BuildConfig if present, otherwise fallback
-    private val geminiApiKey = BuildConfig.GEMINI_API_KEY.ifEmpty { "YOUR_GEMINI_API_KEY_HERE" }
+    // Uses API key from local.properties / BuildConfig if present
+    private val geminiApiKey = BuildConfig.GEMINI_API_KEY.ifEmpty { "" }
 
     private val generativeModel by lazy {
         GenerativeModel(
-            modelName = "gemini-1.5-flash",
+            modelName = "gemini-3.6-flash",
             apiKey = geminiApiKey
         )
     }
@@ -55,7 +57,10 @@ class MainActivity : AppCompatActivity() {
 
     private val pickMedia = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
-            Toast.makeText(this, "Analyzing image...", Toast.LENGTH_SHORT).show()
+            // Show loading screen and disable button to prevent double-clicks
+            loadingOverlay.visibility = View.VISIBLE
+            findViewById<Button>(R.id.btnSelectPhoto).isEnabled = false
+
             val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, uri))
             } else {
@@ -77,6 +82,7 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(R.layout.activity_main)
 
+        loadingOverlay = findViewById(R.id.loadingOverlay)
         mapView = findViewById(R.id.mapView)
 
         // Lock the map to a single, stable street source
@@ -94,11 +100,17 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val prompt = """
-                    Analyze this image. If you can confidently identify the location, return a valid JSON object with:
+                    You are an elite Geoguessr detective. Analyze this image to find its exact location.
+                    Return a valid JSON object with the following keys in exact order:
+                    - "step_1_visual_clues": List every readable shop name, street sign, architectural style, and specific background detail visible.
+                    - "step_2_logical_deduction": Explain step-by-step what specific town has this exact combination of clues. 
                     - "title": Name of the landmark or location.
                     - "description": A short summary of what is visible.
-                    - "search_query": Specific location name and city (e.g. 'Market Place, Brigg'). Do NOT include country.
-                    Do NOT include coordinates. If unknown, reply 'UNKNOWN_LOCATION'.
+                    - "search_query": Specific location name and city (e.g. 'High Street, Scunthorpe'). Do NOT include country.
+                    
+                    CRITICAL RULES:
+                    1. Do NOT include coordinates in the JSON.
+                    2. If you cannot logically deduce the specific town based on unique, cross-referenced evidence, you MUST reply EXACTLY with 'UNKNOWN_LOCATION'. Do not guess blindly.
                 """.trimIndent()
 
                 val response = generativeModel.generateContent(
@@ -111,15 +123,13 @@ class MainActivity : AppCompatActivity() {
                 val rawText = response.text?.trim() ?: ""
 
                 if (!rawText.contains("UNKNOWN_LOCATION")) {
-                    
-                    // Robust parser: Ignores extra text and finds only the JSON
                     val startIndex = rawText.indexOf('{')
                     val endIndex = rawText.lastIndexOf('}')
 
                     if (startIndex != -1 && endIndex != -1) {
                         val cleanJson = rawText.substring(startIndex, endIndex + 1)
                         val json = JSONObject(cleanJson)
-                        
+
                         val title = json.getString("title")
                         val description = json.getString("description")
                         val searchQuery = json.getString("search_query")
@@ -130,11 +140,7 @@ class MainActivity : AppCompatActivity() {
                             if (coords != null) {
                                 plotOnMap(coords, title, description)
                             } else {
-                                Toast.makeText(
-                                    this@MainActivity,
-                                    "Identified '$searchQuery', but could not map coordinates.",
-                                    Toast.LENGTH_LONG
-                                ).show()
+                                Toast.makeText(this@MainActivity, "Identified '$searchQuery', but could not map coordinates.", Toast.LENGTH_LONG).show()
                             }
                         }
                     } else {
@@ -150,6 +156,11 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    loadingOverlay.visibility = View.GONE
+                    findViewById<Button>(R.id.btnSelectPhoto).isEnabled = true
                 }
             }
         }

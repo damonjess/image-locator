@@ -11,14 +11,15 @@ if (localPropertiesFile.exists()) {
     localProperties.load(localPropertiesFile.inputStream())
 }
 val geminiApiKey: String = localProperties.getProperty("GEMINI_API_KEY") ?: System.getenv("GEMINI_API_KEY") ?: ""
+val cloudVisionApiKey: String = localProperties.getProperty("CLOUD_VISION_API_KEY")
+    ?: System.getenv("CLOUD_VISION_API_KEY")
+    ?: geminiApiKey
 
 val mapsApiKey: String = localProperties.getProperty("MAPS_API_KEY") ?: geminiApiKey
 
 android {
     namespace = "com.example.location_finder"
-    compileSdk {
-        version = release(37)
-    }
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.example.location_finder"
@@ -29,6 +30,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
+        buildConfigField("String", "CLOUD_VISION_API_KEY", "\"$cloudVisionApiKey\"")
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
     }
 
