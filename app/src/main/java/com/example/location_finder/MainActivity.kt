@@ -1,8 +1,12 @@
 package com.example.location_finder
 
+import android.Manifest
 import android.app.AlertDialog
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
+import android.graphics.Matrix
 import android.location.Geocoder
 import android.os.Build
 import android.os.Bundle
@@ -11,11 +15,21 @@ import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.Toast
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.floatingactionbutton.FloatingActionButton
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -31,16 +45,20 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var mapView: MapView
     private lateinit var loadingOverlay: FrameLayout
+    private lateinit var cameraOverlay: FrameLayout
+    private lateinit var previewView: PreviewView
+    private var imageCapture: ImageCapture? = null
+    private lateinit var cameraExecutor: ExecutorService
 
-    // Uses API key from local.properties / BuildConfig if present
     private val geminiApiKey = BuildConfig.GEMINI_API_KEY.ifEmpty { "" }
 
-    // Keeps the last picked photo around so "Verify" can re-run it without a new picker trip
     private var lastBitmap: Bitmap? = null
 
     private val reliableStreetSource = object : XYTileSource(
@@ -70,6 +88,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val requestCameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            openCamera()
+        } else {
+            Toast.makeText(this, "Camera permission is needed for live capture.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -82,7 +108,10 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         loadingOverlay = findViewById(R.id.loadingOverlay)
+        cameraOverlay = findViewById(R.id.cameraOverlay)
+        previewView = findViewById(R.id.cameraPreviewView)
         mapView = findViewById(R.id.mapView)
+        cameraExecutor = Executors.newSingleThreadExecutor()
 
         mapView.setTileSource(reliableStreetSource)
         mapView.setMultiTouchControls(true)
@@ -103,11 +132,98 @@ class MainActivity : AppCompatActivity() {
                 askGeminiForLocationGrounded(bitmap)
             }
         }
+
+        findViewById<Button>(R.id.btnCamera).setOnClickListener {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED
+            ) {
+                openCamera()
+            } else {
+                requestCameraPermission.launch(Manifest.permission.CAMERA)
+            }
+        }
+
+        findViewById<ImageButton>(R.id.btnCloseCamera).setOnClickListener {
+            closeCamera()
+        }
+
+        findViewById<FloatingActionButton>(R.id.btnShutter).setOnClickListener {
+            capturePhoto()
+        }
+    }
+
+    private fun openCamera() {
+        cameraOverlay.visibility = View.VISIBLE
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(previewView.surfaceProvider)
+            }
+            val capture = ImageCapture.Builder().build()
+            try {
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture)
+                imageCapture = capture
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Camera bind failed", e)
+                Toast.makeText(this, "Could not start camera: ${e.message}", Toast.LENGTH_LONG).show()
+                closeCamera()
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun closeCamera() {
+        cameraOverlay.visibility = View.GONE
+        try {
+            ProcessCameraProvider.getInstance(this).get().unbindAll()
+        } catch (_: Exception) {
+        }
+        imageCapture = null
+    }
+
+    private fun capturePhoto() {
+        val capture = imageCapture ?: return
+        capture.takePicture(cameraExecutor, object : ImageCapture.OnImageCapturedCallback() {
+            override fun onCaptureSuccess(image: ImageProxy) {
+                val bitmap = imageProxyToBitmap(image)
+                image.close()
+                runOnUiThread {
+                    closeCamera()
+                    lastBitmap = bitmap
+                    loadingOverlay.visibility = View.VISIBLE
+                    setButtonsEnabled(false)
+                    askGeminiForLocation(bitmap)
+                }
+            }
+
+            override fun onError(exception: ImageCaptureException) {
+                Log.e("MainActivity", "Photo capture failed", exception)
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "Capture failed: ${exception.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        })
+    }
+
+    private fun imageProxyToBitmap(image: ImageProxy): Bitmap {
+        val buffer = image.planes[0].buffer
+        val bytes = ByteArray(buffer.remaining())
+        buffer.get(bytes)
+        var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+
+        val rotation = image.imageInfo.rotationDegrees
+        if (rotation != 0) {
+            val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
+            bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        }
+        return bitmap
     }
 
     private fun setButtonsEnabled(enabled: Boolean) {
         findViewById<Button>(R.id.btnSelectPhoto).isEnabled = enabled
         findViewById<Button>(R.id.btnVerify).isEnabled = enabled
+        findViewById<Button>(R.id.btnCamera).isEnabled = enabled
     }
 
     private val prompt = """
@@ -147,7 +263,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Grounded re-check — only called when the user taps "Verify", not on every photo. */
     private fun askGeminiForLocationGrounded(bitmap: Bitmap) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -176,7 +291,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Shared parsing + mapping logic used by both the normal and grounded (Verify) calls. */
     private suspend fun handleGeminiResponse(rawText: String) {
         if (!rawText.contains("UNKNOWN_LOCATION")) {
             val startIndex = rawText.indexOf('{')
@@ -283,5 +397,10 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         mapView.onPause()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        cameraExecutor.shutdown()
     }
 }

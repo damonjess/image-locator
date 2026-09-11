@@ -5,13 +5,11 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <!-- Map fills the whole screen -->
     <org.osmdroid.views.MapView
         android:id="@+id/mapView"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- Button Container at Bottom -->
     <LinearLayout
         android:id="@+id/buttonContainer"
         android:layout_width="wrap_content"
@@ -27,7 +25,17 @@
             android:layout_width="wrap_content"
             android:layout_height="60dp"
             android:layout_marginEnd="8dp"
-            android:text="Identify Photo"
+            android:text="Gallery"
+            android:textSize="16sp"
+            app:cornerRadius="30dp"
+            app:icon="@android:drawable/ic_menu_camera" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnCamera"
+            android:layout_width="wrap_content"
+            android:layout_height="60dp"
+            android:layout_marginEnd="8dp"
+            android:text="Camera"
             android:textSize="16sp"
             app:cornerRadius="30dp"
             app:icon="@android:drawable/ic_menu_camera" />
@@ -43,6 +51,39 @@
             app:icon="@android:drawable/ic_menu_search" />
 
     </LinearLayout>
+
+    <!-- Live camera viewfinder overlay, hidden until "Camera" is tapped -->
+    <FrameLayout
+        android:id="@+id/cameraOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:elevation="5dp"
+        android:visibility="gone">
+
+        <androidx.camera.view.PreviewView
+            android:id="@+id/cameraPreviewView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <ImageButton
+            android:id="@+id/btnCloseCamera"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="top|start"
+            android:layout_margin="16dp"
+            android:background="#66000000"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:contentDescription="Close camera" />
+
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/btnShutter"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="40dp"
+            app:srcCompat="@android:drawable/ic_menu_camera" />
+
+    </FrameLayout>
 
     <!-- Dimmed Loading Overlay (Hidden by default) -->
     <FrameLayout

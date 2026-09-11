@@ -69,7 +69,7 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     // Google CameraX for free camera UI
-    val camerax_version = "1.3.0"
+    val camerax_version = "1.6.2"
     implementation("androidx.camera:camera-core:${camerax_version}")
     implementation("androidx.camera:camera-camera2:${camerax_version}")
     implementation("androidx.camera:camera-lifecycle:${camerax_version}")
