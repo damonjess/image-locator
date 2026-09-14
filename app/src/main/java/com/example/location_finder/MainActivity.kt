@@ -266,32 +266,38 @@ class MainActivity : AppCompatActivity() {
     // -----------------------------------------------------------------------
 
     private val prompt = """
-        You are an elite Geoguessr detective. Analyze this image to find its exact location.
+        You are an elite Geoguessr detective and architectural historian. Analyze this image to identify its exact real-world location.
 
-        CRITICAL: Many towns have similar landmarks (e.g. multiple towns have a "Buttercross", "Market Cross", or "Town Hall"). You MUST identify the specific town by cross-referencing ALL visible clues — shop names, pub names, street signs, road markings, vehicle registration plates, architectural styles — not just the landmark name alone. If a landmark name could exist in multiple towns, explain which specific town is correct based on the other visible clues.
+        CRITICAL ARCHITECTURAL & LOCATION DISAMBIGUATION:
+        Many towns share common landmark names (e.g., "Buttercross", "Market Cross", "Clock Tower", "Town Hall", "Corn Exchange"). You MUST cross-reference physical architecture, building materials, surrounding streets, and shopfronts to identify the SPECIFIC town:
+        1. DO NOT assume a landmark belongs to the most famous town associated with that name! You must compare the visual architecture:
+           - Oakham's Buttercross (Rutland) is an open-air 16th-century octagonal timber-framed pavilion with a slate roof enclosing medieval stocks.
+           - Brigg's Buttercross (Market Place, Brigg, North Lincolnshire) is a 2-storey brick building erected in 1819 with a prominent clock tower and weather vane on top, arched windows/doors, and bunting hanging across the pedestrian square.
+           - Otley, Bingham, Dunster, Chichester, Scarborough, and Whittlesey also have distinct Buttercross/Market Cross structures.
+        2. If the image shows a 2-storey brick building with a clock tower on top in a market square decorated with bunting, it is the Buttercross in BRIGG, North Lincolnshire (UK), NOT Oakham!
+        3. Examine all readable shop names, street signs, pub signs, road markings, and unique architectural features in the image.
 
         Return a valid JSON object with the following keys:
-        - "step_1_visual_clues": List EVERY readable shop name, pub name, street sign, road marking, vehicle registration plate, architectural style, and specific background detail visible. These are critical for distinguishing between similar locations.
-        - "step_2_logical_deduction": Explain step-by-step what specific town or city has this exact combination of clues. If a landmark name could exist in multiple towns, explain which specific town is correct and why.
-        - "title": Name of the landmark or location.
-        - "description": A short summary of what is visible.
+        - "step_1_visual_clues": List EVERY readable shop name, pub name, street sign, road marking, architectural style (e.g. 2-storey brick building with clock tower), and specific background details visible.
+        - "step_2_logical_deduction": Explain step-by-step why this exact location matches a specific town. Verify that the physical architecture matches the target landmark in that town, noting why it is NOT a landmark of the same name in a different town.
+        - "title": Exact name of the landmark and town (e.g., "The Buttercross, Brigg").
+        - "description": A concise description of the location and landmark.
         - "confidence": Your confidence level: "high", "medium", or "low".
-        - "latitude": Your best estimate of the latitude in decimal degrees. Always include your best estimate when you can identify the location.
-        - "longitude": Your best estimate of the longitude in decimal degrees. Always include your best estimate when you can identify the location.
-        - "street": The street name if identifiable (e.g. "High Street"). Omit if unknown.
-        - "city": The city or town name (e.g. "Scunthorpe"). Omit if unknown.
-        - "region": The county or region if identifiable. Omit if unknown.
-        - "country": The full country name (e.g. "United Kingdom"). Omit if unknown.
-        - "country_code": The ISO 3166-1 alpha-2 country code in lowercase (e.g. "gb"). Omit if unknown.
-        - "postcode": The postcode if visible or deducible. Omit if unknown.
-        - "search_query": A precise search string for geocoding including all known address parts and the country (e.g. "High Street, Scunthorpe, DN15 6SU, England, United Kingdom").
+        - "latitude": Estimated latitude in decimal degrees (e.g. 53.5526).
+        - "longitude": Estimated longitude in decimal degrees (e.g. -0.4896).
+        - "street": Street or square name if identifiable (e.g. "Market Place").
+        - "city": Town or city name (e.g. "Brigg").
+        - "region": County or region (e.g. "North Lincolnshire").
+        - "country": Full country name (e.g. "United Kingdom").
+        - "country_code": ISO country code in lowercase (e.g. "gb").
+        - "postcode": Postcode if known (e.g. "DN20 8ER").
+        - "search_query": Precise search string including landmark, street, town, county, and country (e.g. "The Buttercross, Market Place, Brigg, North Lincolnshire, DN20 8ER, United Kingdom").
 
         CRITICAL RULES:
-        1. If you cannot logically deduce the specific location based on unique, cross-referenced evidence, you MUST reply EXACTLY with 'UNKNOWN_LOCATION'. Do not guess blindly.
-        2. Do NOT assume a landmark name uniquely identifies a town. Multiple towns may have buildings with the same name. Always verify using other visible clues such as shop names, pub names, and street signs.
-        3. Latitude and longitude are estimates. The app will verify them against other sources.
-        4. Include as many structured address fields as possible for accurate geocoding.
-        5. The search_query MUST include the country name.
+        1. Reply ONLY with valid JSON.
+        2. If you cannot logically deduce the location based on evidence, reply EXACTLY with 'UNKNOWN_LOCATION'.
+        3. Double check that the physical architecture matches the specific town before assigning the town name.
+        4. Always include latitude and longitude estimates when a location is identified.
     """.trimIndent()
 
     // -----------------------------------------------------------------------
@@ -301,11 +307,20 @@ class MainActivity : AppCompatActivity() {
     private fun askGeminiForLocation(bitmap: Bitmap) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val rawText = GeminiClient.generateContent(
-                    apiKey = geminiApiKey,
-                    bitmap = bitmap,
-                    promptText = prompt
-                ).trim()
+                val rawText = try {
+                    GeminiSearchGroundingClient.generateContentWithSearch(
+                        apiKey = geminiApiKey,
+                        bitmap = bitmap,
+                        promptText = prompt
+                    ).trim()
+                } catch (groundingError: Exception) {
+                    Log.w("MainActivity", "Grounded search failed/quota exceeded, falling back to ungrounded model: ${groundingError.message}")
+                    GeminiClient.generateContent(
+                        apiKey = geminiApiKey,
+                        bitmap = bitmap,
+                        promptText = prompt
+                    ).trim()
+                }
                 handleGeminiResponse(rawText)
             } catch (e: Exception) {
                 Log.e("MainActivity", "Gemini Request Failed", e)
@@ -483,7 +498,8 @@ class MainActivity : AppCompatActivity() {
      *    (used when Nominatim can't find the specific landmark, but Gemini's
      *    coordinate estimates fall within the correct town)
      * 4. Android native Geocoder
-     * 5. Gemini coordinates without validation (last resort)
+     * 5. Town area Nominatim query fallback
+     * 6. Gemini coordinates without validation (last resort)
      */
     private fun resolveLocation(result: GeminiLocationResult): ResolvedLocation? {
         // 1. Structured Nominatim query
@@ -511,7 +527,10 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        // 5. Last resort: Gemini coordinates without validation
+        // 5. Town area Nominatim fallback
+        getCoordinatesTownFallback(result)?.let { return it }
+
+        // 6. Last resort: Gemini coordinates without validation
         if (result.latitude != null && result.longitude != null) {
             return ResolvedLocation(
                 point = GeoPoint(result.latitude, result.longitude),
@@ -522,6 +541,50 @@ class MainActivity : AppCompatActivity() {
         }
 
         return null
+    }
+
+    /**
+     * Fallback to querying Nominatim for the town/city name when landmark-level geocoding
+     * returns no results (e.g. "Brigg, North Lincolnshire, United Kingdom").
+     */
+    private fun getCoordinatesTownFallback(result: GeminiLocationResult): ResolvedLocation? {
+        val city = result.city ?: return null
+        return try {
+            val query = buildString {
+                append(city)
+                result.region?.let { append(", ").append(it) }
+                result.country?.let { append(", ").append(it) }
+            }
+            val encodedQuery = URLEncoder.encode(query, "UTF-8")
+            val countryCodeParam = result.countryCode?.let {
+                if (it.length == 2 && it.all { c -> c.isLetter() }) "&countrycodes=${it.lowercase(Locale.ROOT)}" else ""
+            } ?: ""
+
+            val url = URL("https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=json&limit=1&addressdetails=1$countryCodeParam")
+            val connection = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 10000
+                readTimeout = 15000
+                setRequestProperty("User-Agent", "LocationFinderApp/1.0")
+            }
+
+            val response = connection.inputStream.bufferedReader().use { it.readText() }
+            val results = JSONArray(response)
+            if (results.length() == 0) return null
+
+            val obj = results.getJSONObject(0)
+            val point = GeoPoint(obj.getString("lat").toDouble(), obj.getString("lon").toDouble())
+
+            ResolvedLocation(
+                point = point,
+                source = "Nominatim (town area)",
+                isApproximate = true,
+                displayAddress = "${result.title}, $city"
+            )
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Town fallback Nominatim query failed", e)
+            null
+        }
     }
 
     // -----------------------------------------------------------------------
