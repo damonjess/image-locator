@@ -45,6 +45,12 @@ object GeminiSearchGroundingClient {
                     })
                 })
             })
+            // Low temperature for deterministic, factual location identification
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.1)
+                put("topP", 0.95)
+                put("maxOutputTokens", 4096)
+            })
             put("tools", JSONArray().apply {
                 put(JSONObject().apply {
                     put("googleSearch", JSONObject())
