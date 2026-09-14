@@ -273,8 +273,8 @@ class MainActivity : AppCompatActivity() {
         - "title": Name of the landmark or location.
         - "description": A short summary of what is visible.
         - "confidence": Your confidence level: "high", "medium", or "low".
-        - "latitude": Your best estimate of the latitude in decimal degrees. Include only if reasonably confident.
-        - "longitude": Your best estimate of the longitude in decimal degrees. Include only if reasonably confident.
+        - "latitude": Your best estimate of the latitude in decimal degrees. Always include your best estimate when you can identify the location.
+        - "longitude": Your best estimate of the longitude in decimal degrees. Always include your best estimate when you can identify the location.
         - "street": The street name if identifiable (e.g. "High Street"). Omit if unknown.
         - "city": The city or town name (e.g. "Scunthorpe"). Omit if unknown.
         - "region": The county or region if identifiable. Omit if unknown.
@@ -475,8 +475,11 @@ class MainActivity : AppCompatActivity() {
      *
      * 1. Structured Nominatim query (street / city / postcode / country)
      * 2. Free-text Nominatim query (full search_query + country code)
-     * 3. Android native Geocoder
-     * 4. Gemini's own coordinate estimates (last resort — can hallucinate)
+     * 3. Gemini coordinates validated against the town's bounding box
+     *    (used when Nominatim can't find the specific landmark, but Gemini's
+     *    coordinate estimates fall within the correct town)
+     * 4. Android native Geocoder
+     * 5. Gemini coordinates without validation (last resort)
      */
     private fun resolveLocation(result: GeminiLocationResult): ResolvedLocation? {
         // 1. Structured Nominatim query
@@ -485,7 +488,14 @@ class MainActivity : AppCompatActivity() {
         // 2. Free-text Nominatim query
         getCoordinatesNominatimFreeText(result)?.let { return it }
 
-        // 3. Native Android Geocoder
+        // 3. Town-validated Gemini coordinates
+        // When Nominatim can't find the specific landmark/street (e.g. "The Buttercross,
+        // Market Place, Brigg" returns zero results), Gemini's coordinate estimates
+        // validated against the town's bounding box are more reliable than the native
+        // Geocoder, which may resolve to the wrong street entirely.
+        getCoordinatesGeminiValidated(result)?.let { return it }
+
+        // 4. Native Android Geocoder
         val nativeQuery = result.searchQuery ?: result.title
         val nativePoint = getCoordinatesNative(nativeQuery)
         if (nativePoint != null) {
@@ -497,7 +507,7 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        // 4. Last resort: Gemini's coordinate estimates
+        // 5. Last resort: Gemini coordinates without validation
         if (result.latitude != null && result.longitude != null) {
             return ResolvedLocation(
                 point = GeoPoint(result.latitude, result.longitude),
@@ -508,6 +518,73 @@ class MainActivity : AppCompatActivity() {
         }
 
         return null
+    }
+
+    // -----------------------------------------------------------------------
+    // Gemini coordinate validation against town bounding box
+    // -----------------------------------------------------------------------
+
+    /**
+     * When Nominatim can't find the specific landmark/street, validate Gemini's
+     * coordinate estimates against the town's bounding box. If Gemini's
+     * coordinates fall within the correct town, they're far more reliable than
+     * the native Geocoder (which may resolve to the wrong street entirely).
+     *
+     * Example: "The Buttercross, Market Place, Brigg" returns zero Nominatim
+     * results. But Gemini correctly identifies the location and provides
+     * coordinates near the Market Place. We validate those coordinates fall
+     * within Brigg's bounding box, then use them.
+     */
+    private fun getCoordinatesGeminiValidated(result: GeminiLocationResult): ResolvedLocation? {
+        // Need both Gemini coordinates and a city name to validate against
+        if (result.latitude == null || result.longitude == null) return null
+        val city = result.city ?: return null
+
+        return try {
+            val encodedQuery = URLEncoder.encode(city, "UTF-8")
+            val countryCodeParam = result.countryCode?.let {
+                if (it.length == 2 && it.all { c -> c.isLetter() }) "&countrycodes=${it.lowercase(Locale.ROOT)}" else ""
+            } ?: ""
+
+            val url = URL("https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=json&limit=1$countryCodeParam")
+            val connection = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 10000
+                readTimeout = 15000
+                setRequestProperty("User-Agent", "LocationFinderApp/1.0")
+            }
+
+            val response = connection.inputStream.bufferedReader().use { it.readText() }
+            val results = JSONArray(response)
+            if (results.length() == 0) return null
+
+            val town = results.getJSONObject(0)
+            val bbox = town.optJSONArray("boundingbox") ?: return null
+
+            val south = bbox.getString(0).toDouble()
+            val north = bbox.getString(1).toDouble()
+            val west = bbox.getString(2).toDouble()
+            val east = bbox.getString(3).toDouble()
+
+            val lat = result.latitude
+            val lon = result.longitude
+
+            // Check if Gemini's coordinates fall within the town's bounding box
+            if (lat in south..north && lon in west..east) {
+                ResolvedLocation(
+                    point = GeoPoint(lat, lon),
+                    source = "Gemini coordinates (town-validated)",
+                    isApproximate = true,
+                    displayAddress = result.title
+                )
+            } else {
+                // Gemini's coordinates are outside the town — don't trust them
+                null
+            }
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Gemini coordinate town validation failed", e)
+            null
+        }
     }
 
     // -----------------------------------------------------------------------
