@@ -267,9 +267,12 @@ class MainActivity : AppCompatActivity() {
 
     private val prompt = """
         You are an elite Geoguessr detective. Analyze this image to find its exact location.
+
+        CRITICAL: Many towns have similar landmarks (e.g. multiple towns have a "Buttercross", "Market Cross", or "Town Hall"). You MUST identify the specific town by cross-referencing ALL visible clues — shop names, pub names, street signs, road markings, vehicle registration plates, architectural styles — not just the landmark name alone. If a landmark name could exist in multiple towns, explain which specific town is correct based on the other visible clues.
+
         Return a valid JSON object with the following keys:
-        - "step_1_visual_clues": List every readable shop name, street sign, road marking, vehicle registration plate, architectural style, and specific background detail visible.
-        - "step_2_logical_deduction": Explain step-by-step what specific town or city has this exact combination of clues.
+        - "step_1_visual_clues": List EVERY readable shop name, pub name, street sign, road marking, vehicle registration plate, architectural style, and specific background detail visible. These are critical for distinguishing between similar locations.
+        - "step_2_logical_deduction": Explain step-by-step what specific town or city has this exact combination of clues. If a landmark name could exist in multiple towns, explain which specific town is correct and why.
         - "title": Name of the landmark or location.
         - "description": A short summary of what is visible.
         - "confidence": Your confidence level: "high", "medium", or "low".
@@ -285,9 +288,10 @@ class MainActivity : AppCompatActivity() {
 
         CRITICAL RULES:
         1. If you cannot logically deduce the specific location based on unique, cross-referenced evidence, you MUST reply EXACTLY with 'UNKNOWN_LOCATION'. Do not guess blindly.
-        2. Latitude and longitude are estimates. The app will verify them against other sources.
-        3. Include as many structured address fields as possible for accurate geocoding.
-        4. The search_query MUST include the country name.
+        2. Do NOT assume a landmark name uniquely identifies a town. Multiple towns may have buildings with the same name. Always verify using other visible clues such as shop names, pub names, and street signs.
+        3. Latitude and longitude are estimates. The app will verify them against other sources.
+        4. Include as many structured address fields as possible for accurate geocoding.
+        5. The search_query MUST include the country name.
     """.trimIndent()
 
     // -----------------------------------------------------------------------
