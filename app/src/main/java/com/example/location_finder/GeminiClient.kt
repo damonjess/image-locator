@@ -3,6 +3,8 @@ package com.example.location_finder
 import android.graphics.Bitmap
 import android.util.Base64
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -22,8 +24,10 @@ object GeminiClient {
 
     /**
      * Calls Gemini API to analyze the image and generate content.
+     * Each model is retried with backoff for transient errors ("model
+     * overloaded", rate limits, network timeouts) before moving to the next.
      */
-    fun generateContent(
+    suspend fun generateContent(
         apiKey: String,
         bitmap: Bitmap,
         promptText: String
@@ -60,7 +64,12 @@ object GeminiClient {
         for (model in MODELS_TO_TRY) {
             try {
                 val requestUrl = "$BASE_URL/$model:generateContent?key=$apiKey"
-                return executePostRequest(requestUrl, payload)
+                // Retry transient failures per model before falling back
+                return withContext(Dispatchers.IO) {
+                    GeminiRetry.withRetries {
+                        executePostRequest(requestUrl, payload)
+                    }
+                }
             } catch (e: Exception) {
                 lastException = e
             }

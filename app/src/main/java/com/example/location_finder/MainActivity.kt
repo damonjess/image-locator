@@ -261,6 +261,43 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnCamera).isEnabled = enabled
     }
 
+    /**
+     * Turn Gemini/API exceptions into short, actionable toast messages.
+     * The raw API error text ("This model is currently experiencing high
+     * demand...") is long and jargon-heavy; after automatic retries have
+     * failed, tell the user what happened and what to do.
+     */
+    private fun friendlyGeminiError(e: Exception, verify: Boolean): String {
+        val message = (e.message ?: "").lowercase()
+        return when {
+            message.contains("high demand") ||
+                message.contains("overload") ||
+                message.contains("overloaded") ||
+                message.contains("unavailable") ||
+                message.contains("503") ->
+                "Gemini is overloaded right now. It was retried automatically — " +
+                    "please try again in a minute."
+
+            message.contains("resource_exhausted") ||
+                message.contains("quota") ||
+                message.contains("rate limit") ||
+                message.contains("429") ->
+                if (verify) "Verify quota used up for now — try again later, or trust the last result."
+                else "API quota used up for now — try again later."
+
+            message.contains("api key") ||
+                message.contains("api_key") ||
+                message.contains("permission") ->
+                "API key problem — check GEMINI_API_KEY in local.properties."
+
+            message.contains("timeout") ||
+                message.contains("timed out") ->
+                "Connection to Gemini timed out. Check your internet and try again."
+
+            else -> "Error: ${e.message}"
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Prompt — asks Gemini for structured address fields + coordinate estimates
     // -----------------------------------------------------------------------
@@ -325,7 +362,7 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 Log.e("MainActivity", "Gemini Request Failed", e)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, friendlyGeminiError(e, verify = false), Toast.LENGTH_LONG).show()
                 }
             } finally {
                 withContext(Dispatchers.Main) {
@@ -345,15 +382,10 @@ class MainActivity : AppCompatActivity() {
                     promptText = prompt
                 ).trim()
                 handleGeminiResponse(rawText)
-            } catch (e: Exception) {
+            }            catch (e: Exception) {
                 Log.e("MainActivity", "Grounded Verify Request Failed", e)
                 withContext(Dispatchers.Main) {
-                    val msg = if (e.message?.contains("RESOURCE_EXHAUSTED") == true || e.message?.contains("quota") == true) {
-                        "Verify quota used up for now — try again later, or trust the last result."
-                    } else {
-                        "Error: ${e.message}"
-                    }
-                    Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, friendlyGeminiError(e, verify = true), Toast.LENGTH_LONG).show()
                 }
             } finally {
                 withContext(Dispatchers.Main) {
@@ -492,30 +524,38 @@ class MainActivity : AppCompatActivity() {
      * fallback pipeline. EXIF GPS is checked separately in [handleGeminiResponse]
      * before this is called, so this pipeline handles geocoding only:
      *
-     * 1. Structured Nominatim query (street / city / postcode / country)
-     * 2. Free-text Nominatim query (full search_query + country code)
-     * 3. Gemini coordinates validated against the town's bounding box
+     * 1. OpenStreetMap landmark lookup via Overpass (exact landmark node/way,
+     *    when the landmark name matches an OSM object near Gemini's estimate)
+     * 2. Structured Nominatim query (street / city / postcode / country)
+     * 3. Free-text Nominatim query (full search_query + country code)
+     * 4. Gemini coordinates validated against the town's bounding box
      *    (used when Nominatim can't find the specific landmark, but Gemini's
      *    coordinate estimates fall within the correct town)
-     * 4. Android native Geocoder
-     * 5. Town area Nominatim query fallback
-     * 6. Gemini coordinates without validation (last resort)
+     * 5. Android native Geocoder
+     * 6. Town area Nominatim query fallback
+     * 7. Gemini coordinates without validation (last resort)
      */
     private fun resolveLocation(result: GeminiLocationResult): ResolvedLocation? {
-        // 1. Structured Nominatim query
+        // 1. Exact landmark POI lookup in OpenStreetMap. Nominatim frequently
+        //    can't geocode a specific landmark and falls back to a street
+        //    midpoint or town centre; Overpass can find the landmark object
+        //    itself, which puts the pin on the building rather than nearby.
+        OverpassPoiLookup.lookupLandmarkPoi(result)?.let { return it }
+
+        // 2. Structured Nominatim query
         getCoordinatesNominatimStructured(result)?.let { return it }
 
-        // 2. Free-text Nominatim query
+        // 3. Free-text Nominatim query
         getCoordinatesNominatimFreeText(result)?.let { return it }
 
-        // 3. Town-validated Gemini coordinates
+        // 4. Town-validated Gemini coordinates
         // When Nominatim can't find the specific landmark/street (e.g. "The Buttercross,
         // Market Place, Brigg" returns zero results), Gemini's coordinate estimates
         // validated against the town's bounding box are more reliable than the native
         // Geocoder, which may resolve to the wrong street entirely.
         getCoordinatesGeminiValidated(result)?.let { return it }
 
-        // 4. Native Android Geocoder
+        // 5. Native Android Geocoder
         val nativeQuery = result.searchQuery ?: result.title
         val nativePoint = getCoordinatesNative(nativeQuery)
         if (nativePoint != null) {
@@ -527,10 +567,10 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        // 5. Town area Nominatim fallback
+        // 6. Town area Nominatim fallback
         getCoordinatesTownFallback(result)?.let { return it }
 
-        // 6. Last resort: Gemini coordinates without validation
+        // 7. Last resort: Gemini coordinates without validation
         if (result.latitude != null && result.longitude != null) {
             return ResolvedLocation(
                 point = GeoPoint(result.latitude, result.longitude),
