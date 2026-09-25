@@ -33,6 +33,8 @@ object LocationCrossCheck {
         val secondPassConfidence: String?,
         /** What the second pass titled the location, e.g. "The Buttercross, Brigg". */
         val secondPassTitle: String?,
+        /** The second pass's candidate-elimination reasoning (step_2_elimination), shown in the dispute dialog. */
+        val eliminationReasoning: String?,
         /** Short one-line headline, e.g. "Verified — both analyses agree". */
         val headline: String
     )
@@ -51,7 +53,7 @@ object LocationCrossCheck {
         val secondResult = parseSecondPass(second)
 
         // Second pass explicitly could not identify the location.
-        if (secondResult.unknown) return secondPassUnknownResult()
+        if (secondResult.unknown) return secondPassUnknownResult(secondResult.elimination)
 
         val secondTownRaw = secondResult.city ?: secondResult.region
         val secondTown = normalizeTown(secondTownRaw)
@@ -80,6 +82,7 @@ object LocationCrossCheck {
                     false,
                     secondResult.confidence,
                     secondResult.title,
+                    secondResult.elimination,
                     "Verified — both analyses agree (within ${formatDistance(distanceKm)})"
                 )
             }
@@ -95,6 +98,7 @@ object LocationCrossCheck {
                 false,
                 secondResult.confidence,
                 secondResult.title,
+                secondResult.elimination,
                 "Partly verified — same town, different exact spot. Check the details."
             )
         }
@@ -106,12 +110,13 @@ object LocationCrossCheck {
             false,
             secondResult.confidence,
             secondResult.title,
+            secondResult.elimination,
             "Disputed — the two analyses disagree. Trust the first result with caution."
         )
     }
 
     /** Outcome when the second pass replies UNKNOWN_LOCATION (with or without JSON). */
-    fun secondPassUnknownResult(): CrossCheckResult = CrossCheckResult(
+    fun secondPassUnknownResult(eliminationReasoning: String? = null): CrossCheckResult = CrossCheckResult(
         verdict = Verdict.SECOND_PASS_FAILED,
         evidence = listOf(
             "The second analysis could not identify this location from the image, " +
@@ -121,6 +126,7 @@ object LocationCrossCheck {
         secondPassUnknown = true,
         secondPassConfidence = null,
         secondPassTitle = null,
+        eliminationReasoning = eliminationReasoning,
         headline = "Unverified — second analysis could not identify the location"
     )
 
@@ -160,7 +166,9 @@ object LocationCrossCheck {
             title = title.ifEmpty { null },
             city = json.optString("city", "").orEmpty().ifEmpty { null },
             region = json.optString("region", "").orEmpty().ifEmpty { null },
-            confidence = json.optString("confidence", "").orEmpty().ifEmpty { null }
+            confidence = json.optString("confidence", "").orEmpty().ifEmpty { null },
+            candidateTowns = json.optString("step_1_candidate_towns", "").orEmpty().ifEmpty { null },
+            elimination = json.optString("step_2_elimination", "").orEmpty().ifEmpty { null }
         )
     }
 
@@ -169,7 +177,9 @@ object LocationCrossCheck {
         val title: String?,
         val city: String?,
         val region: String?,
-        val confidence: String?
+        val confidence: String?,
+        val candidateTowns: String?,
+        val elimination: String?
     )
 
     private const val EARTH_RADIUS_KM = 6371.0088

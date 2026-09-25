@@ -453,7 +453,18 @@ class MainActivity : AppCompatActivity() {
                 ).trim()
 
                 if (rawText.contains("UNKNOWN_LOCATION")) {
-                    val outcome = LocationCrossCheck.secondPassUnknownResult()
+                    // Even an unknown verdict may carry partial JSON — try to
+                    // recover the elimination reasoning from it.
+                    val startIndex = rawText.indexOf('{')
+                    val endIndex = rawText.lastIndexOf('}')
+                    val partialJson = if (startIndex != -1 && endIndex > startIndex) {
+                        runCatching { JSONObject(rawText.substring(startIndex, endIndex + 1)) }.getOrNull()
+                    } else null
+                    val outcome = if (partialJson != null) {
+                        LocationCrossCheck.compare(baseline, partialJson, null)
+                    } else {
+                        LocationCrossCheck.secondPassUnknownResult()
+                    }
                     Log.i("MainActivity", "Verify outcome: ${outcome.verdict}")
                     withContext(Dispatchers.Main) { showCrossCheckDialog(outcome, baseline) }
                     return@launch
@@ -491,13 +502,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Dialog showing the cross-check verdict, headline and supporting evidence. */
+    /** Dialog showing the cross-check verdict, headline, supporting evidence and — on disputes — the skeptic's reasoning plus a jump-to-candidate button. */
     private fun showCrossCheckDialog(outcome: LocationCrossCheck.CrossCheckResult, baseline: GeminiLocationResult) {
         val message = buildString {
             append(outcome.headline).append("\n\n")
             append("First pass: ").append(baseline.title).append("\n\n")
             outcome.secondPassTitle?.let { append("Second pass: ").append(it).append("\n\n") }
             outcome.evidence.forEach { append("• ").append(it).append("\n") }
+            outcome.eliminationReasoning?.let {
+                append("\nWhy the second pass chose this: ").append(it)
+            }
         }.trimEnd()
 
         val title = when (outcome.verdict) {
@@ -507,11 +521,55 @@ class MainActivity : AppCompatActivity() {
             LocationCrossCheck.Verdict.SECOND_PASS_FAILED -> "❓ Unverified"
         }
 
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle(title)
             .setMessage(message)
             .setPositiveButton("OK", null)
-            .show()
+
+        // On a hard dispute, offer to show the second pass's candidate on the
+        // map as an orange marker so the user can compare the two guesses.
+        if (outcome.verdict == LocationCrossCheck.Verdict.DISPUTED && outcome.secondPassPoint != null) {
+            dialog.setNeutralButton("View second guess") { _, _ ->
+                plotDisputedCandidate(outcome.secondPassPoint, outcome.secondPassTitle ?: "Second guess")
+            }
+        }
+
+        dialog.show()
+    }
+
+    /**
+     * Show the disputed second-pass candidate on the map as an orange marker
+     * alongside the existing first-pass pin, then zoom out so both are
+     * visible. The map marker keeps its own info window; tapping OK earlier
+     * does not remove the first-pass result.
+     */
+    private fun plotDisputedCandidate(point: GeoPoint, title: String) {
+        val existing = mapView.overlays.filterIsInstance<Marker>().firstOrNull()
+        val secondMarker = Marker(mapView).apply {
+            position = point
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            this.title = "⚠️ $title"
+            snippet = "Second analysis candidate — compare with the existing pin"
+        }
+
+        if (existing != null && existing.position != point) {
+            mapView.overlays.add(secondMarker)
+            val points = listOf(existing.position, point)
+            val centerLat = points.map { it.latitude }.average()
+            val centerLon = points.map { it.longitude }.average()
+            mapView.controller.animateTo(GeoPoint(centerLat, centerLon))
+            // Rough zoom-to-fit: ~111 km per degree of latitude.
+            val spanDeg = maxOf(
+                kotlin.math.abs(existing.position.latitude - point.latitude),
+                kotlin.math.abs(existing.position.longitude - point.longitude),
+                0.02
+            )
+            mapView.controller.setZoom((20.0 - kotlin.math.log10(spanDeg * 111.0) / kotlin.math.log10(2.0)).coerceIn(4.0, 17.0))
+        } else {
+            mapView.overlays.add(secondMarker)
+            mapView.controller.animateTo(point)
+        }
+        mapView.invalidate()
     }
 
     // -----------------------------------------------------------------------

@@ -188,4 +188,51 @@ class LocationCrossCheckTest {
         assertTrue(evidence.contains("medium"))
         assertTrue(evidence.contains("Brigg"))
     }
+
+    // -----------------------------------------------------------------------
+    // Elimination reasoning (shown in the dispute dialog)
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun disputedOutcome_carriesEliminationReasoning() {
+        val json = """
+            {"title": "Bungay Buttercross", "city": "Bungay", "confidence": "high",
+             "latitude": 52.4536, "longitude": 1.4358,
+             "step_1_candidate_towns": "Brigg, Oakham, Bungay",
+             "step_2_elimination": "King's Head Hotel sign visible; Brigg has no King's Head adjacent"}
+        """.trimIndent()
+        val outcome = LocationCrossCheck.compare(
+            firstPass(),
+            org.json.JSONObject(json),
+            secondPoint = org.osmdroid.util.GeoPoint(52.4536, 1.4358)
+        )
+        assertEquals(LocationCrossCheck.Verdict.DISPUTED, outcome.verdict)
+        assertEquals(
+            "King's Head Hotel sign visible; Brigg has no King's Head adjacent",
+            outcome.eliminationReasoning
+        )
+    }
+
+    @Test
+    fun unknownVerdict_withReasoning_keepsReasoning() {
+        // Second pass said UNKNOWN_LOCATION but still returned JSON with its
+        // elimination trail — the reasoning must survive for the dialog.
+        val json = """
+            {"title": "UNKNOWN_LOCATION", "step_2_elimination": "Two candidate towns survived"}
+        """.trimIndent()
+        val outcome = LocationCrossCheck.compare(firstPass(), org.json.JSONObject(json), secondPoint = null)
+        assertEquals(LocationCrossCheck.Verdict.SECOND_PASS_FAILED, outcome.verdict)
+        assertEquals("Two candidate towns survived", outcome.eliminationReasoning)
+    }
+
+    @Test
+    fun confirmedOutcome_nullReasoningWhenAbsent() {
+        val outcome = LocationCrossCheck.compare(
+            firstPass(),
+            org.json.JSONObject(secondPassJson(city = "Brigg", lat = 53.5535, lon = -0.4905)),
+            secondPoint = org.osmdroid.util.GeoPoint(53.5535, -0.4905)
+        )
+        assertEquals(LocationCrossCheck.Verdict.CONFIRMED, outcome.verdict)
+        assertNull(outcome.eliminationReasoning)
+    }
 }
