@@ -376,11 +376,23 @@ class MainActivity : AppCompatActivity() {
     private fun askGeminiForLocationGrounded(bitmap: Bitmap) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val rawText = GeminiSearchGroundingClient.generateContentWithSearch(
-                    apiKey = geminiApiKey,
-                    bitmap = bitmap,
-                    promptText = prompt
-                ).trim()
+                val rawText = try {
+                    GeminiSearchGroundingClient.generateContentWithSearch(
+                        apiKey = geminiApiKey,
+                        bitmap = bitmap,
+                        promptText = prompt
+                    ).trim()
+                } catch (groundingError: Exception) {
+                    Log.w("MainActivity", "Grounded search failed/quota exceeded, falling back to ungrounded model: ${groundingError.message}")
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, "Grounding unavailable/quota exceeded, using standard AI instead.", Toast.LENGTH_LONG).show()
+                    }
+                    GeminiClient.generateContent(
+                        apiKey = geminiApiKey,
+                        bitmap = bitmap,
+                        promptText = prompt
+                    ).trim()
+                }
                 handleGeminiResponse(rawText)
             }            catch (e: Exception) {
                 Log.e("MainActivity", "Grounded Verify Request Failed", e)

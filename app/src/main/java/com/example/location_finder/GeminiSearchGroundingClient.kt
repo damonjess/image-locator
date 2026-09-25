@@ -17,9 +17,9 @@ object GeminiSearchGroundingClient {
     private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
     private val MODELS_TO_TRY = listOf(
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.1-flash-lite"
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b"
     )
 
     /**
