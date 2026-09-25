@@ -46,19 +46,55 @@ class OverpassPoiLookupTest {
     // -----------------------------------------------------------------------
 
     @Test
-    fun buildQuery_containsRegexAroundAndOutput() {
+    fun buildQuery_exactNamesWithArticleVariants() {
         val query = OverpassPoiLookup.buildOverpassQuery("The Buttercross", brigg, 2000)
         assertTrue(query.startsWith("[out:xml][timeout:15];("))
-        assertTrue(query.contains("node[\"name\"~\"The Buttercross\",i](around:2000,53.552600,-0.489600)"))
-        assertTrue(query.contains("way[\"name\"~\"The Buttercross\",i](around:2000,53.552600,-0.489600)"))
-        assertTrue(query.contains("relation[\"name\"~\"The Buttercross\",i](around:2000,53.552600,-0.489600)"))
+        assertTrue(query.contains("node[\"name\"=\"The Buttercross\"](around:2000,53.552600,-0.489600)"))
+        assertTrue(query.contains("way[\"name\"=\"The Buttercross\"](around:2000,53.552600,-0.489600)"))
+        // Article-less variant is queried too
+        assertTrue(query.contains("node[\"name\"=\"Buttercross\"]"))
         assertTrue(query.endsWith(");out center 20;"))
+        // Exact-name queries must NOT use the slow case-insensitive regex
+        assertFalse(query.contains("~"))
     }
 
     @Test
-    fun buildQuery_escapesRegexSpecials() {
+    fun buildQuery_escapesSpecialCharacters() {
         val query = OverpassPoiLookup.buildOverpassQuery("St. Mary's (Old)", brigg, 2000)
         assertTrue(query.contains("St\\. Mary's \\(Old\\)"))
+    }
+
+    @Test
+    fun nameVariants_addsAndStripsArticle() {
+        assertEquals(
+            listOf("The Buttercross", "Buttercross"),
+            OverpassPoiLookup.nameVariantsFor("The Buttercross")
+        )
+        assertEquals(
+            listOf("Market Cross", "The Market Cross"),
+            OverpassPoiLookup.nameVariantsFor("Market Cross")
+        )
+    }
+
+    @Test
+    fun errorBody_htmlPage_isDetected() {
+        val html = """<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "x">
+            <html><body><p>Error: runtime error: open64 ...</p></body></html>""".trimIndent()
+        assertTrue(OverpassPoiLookup.isOverpassErrorBody(html))
+    }
+
+    @Test
+    fun errorBody_xmlWithRuntimeErrorRemark_isDetected() {
+        val xml = """<?xml version="1.0" encoding="UTF-8"?>
+            <osm version="0.6"><remark> runtime error: Query timed out. </remark></osm>""".trimIndent()
+        assertTrue(OverpassPoiLookup.isOverpassErrorBody(xml))
+    }
+
+    @Test
+    fun errorBody_normalResponse_isNotError() {
+        val xml = """<?xml version="1.0" encoding="UTF-8"?>
+            <osm version="0.6"><node id="1" lat="53.5" lon="-0.5"/></osm>""".trimIndent()
+        assertFalse(OverpassPoiLookup.isOverpassErrorBody(xml))
     }
 
     // -----------------------------------------------------------------------

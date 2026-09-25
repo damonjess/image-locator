@@ -46,7 +46,8 @@ object OverpassPoiLookup {
 
     private val ENDPOINTS = arrayOf(
         "https://overpass-api.de/api/interpreter",
-        "https://overpass.kumi.systems/api/interpreter"
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
     )
 
     private val STOP_WORDS = setOf("the", "a", "an", "of", "and", "at", "in", "on")
@@ -122,19 +123,55 @@ object OverpassPoiLookup {
     }
 
     /**
-     * Build an Overpass QL query: any named node/way/relation whose name
-     * contains the landmark name, within [radiusMeters] of [center]. Ways and
-     * relations are returned with their geometric centre.
+     * Build an Overpass QL query: any named node/way whose name exactly equals
+     * the landmark name (or a common article variant), within [radiusMeters]
+     * of [center]. Ways are returned with their geometric centre.
+     *
+     * Exact-name matches can use Overpass's name index. A case-insensitive
+     * substring regex (~"...",i) scans unindexed data and regularly times out
+     * on busy servers — observed at 29+ seconds against overpass-api.de.
      */
     internal fun buildOverpassQuery(landmarkName: String, center: GeoPoint, radiusMeters: Int): String {
-        val nameRegex = escapeOsmRegex(landmarkName)
         val lat = String.format(Locale.ROOT, "%.6f", center.latitude)
         val lon = String.format(Locale.ROOT, "%.6f", center.longitude)
-        return "[out:xml][timeout:15];(" +
-            "node[\"name\"~\"$nameRegex\",i](around:$radiusMeters,$lat,$lon);" +
-            "way[\"name\"~\"$nameRegex\",i](around:$radiusMeters,$lat,$lon);" +
-            "relation[\"name\"~\"$nameRegex\",i](around:$radiusMeters,$lat,$lon);" +
-            ");out center 20;"
+        val clauses = StringBuilder()
+        for (name in nameVariantsFor(landmarkName)) {
+            val escaped = escapeOsmRegex(name)
+            clauses.append("node[\"name\"=\"$escaped\"](around:$radiusMeters,$lat,$lon);")
+            clauses.append("way[\"name\"=\"$escaped\"](around:$radiusMeters,$lat,$lon);")
+        }
+        return "[out:xml][timeout:15];($clauses);out center 20;"
+    }
+
+    /**
+     * Common name variants for the landmark: OSM mappers often omit or keep
+     * the leading article ("The Buttercross" vs "Buttercross").
+     */
+    internal fun nameVariantsFor(landmarkName: String): List<String> {
+        val trimmed = landmarkName.trim()
+        val variants = linkedSetOf(trimmed)
+        if (trimmed.startsWith("The ", ignoreCase = true)) {
+            variants.add(trimmed.substring(4).trim())
+        } else {
+            variants.add("The $trimmed")
+        }
+        return variants.toList()
+    }
+
+    /**
+     * Detect Overpass failure responses that arrive with HTTP 200: an HTML
+     * error page ("server too busy") or an XML body carrying a <remark>
+     * runtime error. Both must be treated as failures so the caller falls
+     * through to the mirror endpoint instead of parsing zero results.
+     */
+    internal fun isOverpassErrorBody(body: String): Boolean {
+        val trimmed = body.trimStart()
+        if (trimmed.startsWith("<!DOCTYPE html", ignoreCase = true) ||
+            trimmed.startsWith("<html", ignoreCase = true)
+        ) {
+            return true
+        }
+        return body.contains("runtime error", ignoreCase = true)
     }
 
     /**
@@ -270,15 +307,27 @@ object OverpassPoiLookup {
         }
     }
 
-    /** POST the query to Overpass, trying the primary endpoint then a mirror. */
+    /** Total time budget for the whole Overpass step across all endpoints. */
+    private const val TOTAL_BUDGET_MS = 25_000L
+
+    /** Per-request read timeout — kept short so a dead mirror doesn't eat the budget. */
+    private const val READ_TIMEOUT_MS = 12_000
+
+    /**
+     * POST the query to Overpass, trying the primary endpoint then mirrors,
+     * within a total time budget so an OSM outage doesn't stall the UI for
+     * minutes — the geocoding pipeline has other fallbacks to get on with.
+     */
     private fun executeQuery(query: String): String {
         var lastError: Exception? = null
+        val deadline = System.currentTimeMillis() + TOTAL_BUDGET_MS
         for (endpoint in ENDPOINTS) {
+            if (System.currentTimeMillis() >= deadline) break
             try {
                 val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
-                    connectTimeout = 10_000
-                    readTimeout = 20_000
+                    connectTimeout = 8_000
+                    readTimeout = READ_TIMEOUT_MS
                     doOutput = true
                     setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
                     setRequestProperty("User-Agent", "LocationFinderApp/1.0")
@@ -291,7 +340,13 @@ object OverpassPoiLookup {
                     lastError = IOException("$endpoint returned HTTP $code")
                     continue
                 }
-                return connection.inputStream.bufferedReader().use { it.readText() }
+                val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
+                // Busy Overpass servers return HTTP 200 with an HTML error page
+                if (isOverpassErrorBody(responseBody)) {
+                    lastError = IOException("$endpoint returned an error page")
+                    continue
+                }
+                return responseBody
             } catch (e: Exception) {
                 lastError = e
             }
