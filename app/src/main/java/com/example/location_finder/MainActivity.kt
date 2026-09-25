@@ -94,6 +94,9 @@ class MainActivity : AppCompatActivity() {
     private var lastBitmap: Bitmap? = null
     private var lastImageUri: Uri? = null
 
+    /** First-pass structured result from the last successful lookup — the baseline Verify cross-checks against. */
+    private var lastGeminiResult: GeminiLocationResult? = null
+
     private val reliableStreetSource = object : XYTileSource(
         "OSMStandard",
         0, 19, 256, ".png",
@@ -118,6 +121,7 @@ class MainActivity : AppCompatActivity() {
                 MediaStore.Images.Media.getBitmap(contentResolver, uri)
             }
             lastBitmap = bitmap
+            lastGeminiResult = null  // New photo: old result is no longer verifiable
             askGeminiForLocation(bitmap)
         }
     }
@@ -158,12 +162,17 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.btnVerify).setOnClickListener {
             val bitmap = lastBitmap
-            if (bitmap == null) {
-                Toast.makeText(this, "Identify a photo first, then Verify.", Toast.LENGTH_SHORT).show()
-            } else {
-                loadingOverlay.visibility = View.VISIBLE
-                setButtonsEnabled(false)
-                askGeminiForLocationGrounded(bitmap)
+            val baseline = lastGeminiResult
+            when {
+                bitmap == null ->
+                    Toast.makeText(this, "Identify a photo first, then Verify.", Toast.LENGTH_SHORT).show()
+                baseline == null ->
+                    Toast.makeText(this, "No result to verify yet — identify a photo first.", Toast.LENGTH_SHORT).show()
+                else -> {
+                    loadingOverlay.visibility = View.VISIBLE
+                    setButtonsEnabled(false)
+                    verifyLocation(bitmap, baseline)
+                }
             }
         }
 
@@ -252,6 +261,7 @@ class MainActivity : AppCompatActivity() {
                     closeCamera()
                     lastBitmap = bitmap
                     lastImageUri = null  // CameraX captures have no file URI or EXIF GPS
+                    lastGeminiResult = null  // New photo: old result is no longer verifiable
                     loadingOverlay.visibility = View.VISIBLE
                     setButtonsEnabled(false)
                     askGeminiForLocation(bitmap)
@@ -361,6 +371,34 @@ class MainActivity : AppCompatActivity() {
         2. If you cannot logically deduce the location based on evidence, reply EXACTLY with 'UNKNOWN_LOCATION'.
         3. Double check that the physical architecture matches the specific town before assigning the town name.
         4. Always include latitude and longitude estimates when a location is identified.
+        5. Ensure "search_query" is consistent with "street", "city", "region", "postcode" and "country" — never name a different town in the search query than in "city".
+    """.trimIndent()
+
+    /**
+     * Strict second-opinion prompt for the Verify button. Runs as a fully
+     * independent pass — no hints from the first analysis and no search
+     * grounding tool (so no tool quota involved) — so it can catch a
+     * confidently wrong first answer, e.g. the right landmark name attached
+     * to the wrong town.
+     */
+    private val verifyPrompt = """
+        You are a sceptical location analyst performing an INDEPENDENT SECOND-OPINION review. A previous analysis of this image may be wrong, overconfident, or have attached a well-known landmark name to the wrong town. Ignore any prior conclusions and re-derive the location from scratch.
+
+        MANDATORY ELIMINATION PROTOCOL:
+        1. First, list EVERY candidate town that shares the key landmark or feature visible in the image (landmark names like "Buttercross", "Market Cross", "Clock Tower", "Town Hall" often exist in several towns).
+        2. Use only physical, checkable evidence in the image — building materials, roof style, shop fascias, signage, road markings, street furniture, terrain — to eliminate each candidate town one by one, stating the specific visual reason for each elimination.
+        3. Read every legible shop name, street sign, or pub name in the image. If a name is present, verify it plausibly exists in your surviving candidate town; if it does not, that town is eliminated.
+        4. Only when exactly one candidate survives, commit to it. If two or more candidates survive, or the evidence is insufficient, you must answer UNKNOWN_LOCATION.
+
+        ANTI-BIAS RULES:
+        - Do NOT default to the largest or most famous town sharing the landmark name; smaller towns are equally likely.
+        - If you catch yourself reasoning towards a town "because it is well known", stop and re-examine the smaller candidates first.
+        - Never guess coordinates without at least two independent pieces of visual evidence.
+
+        You MUST reply with ONLY a valid JSON object with exactly these keys:
+        {"step_1_candidate_towns": string, "step_2_elimination": string, "title": string, "description": string, "confidence": "high" or "medium" or "low", "latitude": number, "longitude": number, "city": string, "region": string, "country": string}
+
+        Use "UNKNOWN_LOCATION" as "title" if you could not identify it. Use 0 for latitude and longitude if unknown.
     """.trimIndent()
 
     // -----------------------------------------------------------------------
@@ -399,29 +437,48 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun askGeminiForLocationGrounded(bitmap: Bitmap) {
+    /**
+     * Verify the current result with a second, fully independent Gemini pass
+     * using [verifyPrompt]. Unlike the old grounded-search verification this
+     * uses no Google Search tool quota, works on every plan, and directly
+     * targets the classic disambiguation failure: a confidently wrong town.
+     */
+    private fun verifyLocation(bitmap: Bitmap, baseline: GeminiLocationResult) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val rawText = try {
-                    GeminiSearchGroundingClient.generateContentWithSearch(
-                        apiKey = geminiApiKey,
-                        bitmap = bitmap,
-                        promptText = prompt
-                    ).trim()
-                } catch (groundingError: Exception) {
-                    Log.w("MainActivity", "Grounded search failed/quota exceeded, falling back to ungrounded model: ${groundingError.message}")
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(this@MainActivity, "Grounding unavailable/quota exceeded, using standard AI instead.", Toast.LENGTH_LONG).show()
-                    }
-                    GeminiClient.generateContent(
-                        apiKey = geminiApiKey,
-                        bitmap = bitmap,
-                        promptText = prompt
-                    ).trim()
+                val rawText = GeminiClient.generateContent(
+                    apiKey = geminiApiKey,
+                    bitmap = bitmap,
+                    promptText = verifyPrompt
+                ).trim()
+
+                if (rawText.contains("UNKNOWN_LOCATION")) {
+                    val outcome = LocationCrossCheck.secondPassUnknownResult()
+                    Log.i("MainActivity", "Verify outcome: ${outcome.verdict}")
+                    withContext(Dispatchers.Main) { showCrossCheckDialog(outcome, baseline) }
+                    return@launch
                 }
-                handleGeminiResponse(rawText)
-            }            catch (e: Exception) {
-                Log.e("MainActivity", "Grounded Verify Request Failed", e)
+
+                val startIndex = rawText.indexOf('{')
+                val endIndex = rawText.lastIndexOf('}')
+                if (startIndex == -1 || endIndex <= startIndex) {
+                    throw RuntimeException("Second analysis returned an unreadable answer.")
+                }
+
+                val secondJson = JSONObject(rawText.substring(startIndex, endIndex + 1))
+                val secondPoint = secondJson.optDouble("latitude", Double.NaN)
+                    .takeUnless { it.isNaN() }
+                    ?.let { lat ->
+                        secondJson.optDouble("longitude", Double.NaN)
+                            .takeUnless { it.isNaN() }
+                            ?.let { lon -> GeoPoint(lat, lon) }
+                    }
+
+                val outcome = LocationCrossCheck.compare(baseline, secondJson, secondPoint)
+                Log.i("MainActivity", "Verify outcome: ${outcome.verdict} — ${outcome.headline}")
+                withContext(Dispatchers.Main) { showCrossCheckDialog(outcome, baseline) }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Verify Request Failed", e)
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@MainActivity, friendlyGeminiError(e, verify = true), Toast.LENGTH_LONG).show()
                 }
@@ -432,6 +489,29 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /** Dialog showing the cross-check verdict, headline and supporting evidence. */
+    private fun showCrossCheckDialog(outcome: LocationCrossCheck.CrossCheckResult, baseline: GeminiLocationResult) {
+        val message = buildString {
+            append(outcome.headline).append("\n\n")
+            append("First pass: ").append(baseline.title).append("\n\n")
+            outcome.secondPassTitle?.let { append("Second pass: ").append(it).append("\n\n") }
+            outcome.evidence.forEach { append("• ").append(it).append("\n") }
+        }.trimEnd()
+
+        val title = when (outcome.verdict) {
+            LocationCrossCheck.Verdict.CONFIRMED -> "✅ Verified"
+            LocationCrossCheck.Verdict.CLOSE_MATCH -> "🟡 Partly verified"
+            LocationCrossCheck.Verdict.DISPUTED -> "⚠️ Disputed"
+            LocationCrossCheck.Verdict.SECOND_PASS_FAILED -> "❓ Unverified"
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     // -----------------------------------------------------------------------
@@ -486,6 +566,7 @@ class MainActivity : AppCompatActivity() {
             val json = JSONObject(cleanJson)
 
             val result = parseGeminiResponse(json)
+            lastGeminiResult = result
 
             // If EXIF GPS is available, use it directly with Gemini's title/description
             if (exifPoint != null) {
