@@ -184,6 +184,32 @@ class MainActivity : AppCompatActivity() {
         findViewById<FloatingActionButton>(R.id.btnShutter).setOnClickListener {
             capturePhoto()
         }
+
+        warnIfGeminiModelsUnavailable()
+    }
+
+    /**
+     * On startup, validate the configured Gemini fallback chain against the
+     * API's ListModels endpoint. A retired/renamed model name fails every
+     * lookup with "model not found" at request time; catching it at launch
+     * turns a silent app-wide breakage into an obvious, actionable warning.
+     * Best-effort only: silently skipped when offline or the key is missing.
+     */
+    private fun warnIfGeminiModelsUnavailable() {
+        if (geminiApiKey.isEmpty()) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val missing = GeminiModels.missingModels(geminiApiKey)
+            if (missing.isEmpty()) return@launch
+            Log.e("MainActivity", "Gemini model check: configured models not available for this key: $missing")
+            withContext(Dispatchers.Main) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "Location AI may be broken: model(s) ${missing.joinToString()} are no longer available. " +
+                        "Update the model list in GeminiModels.kt.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
     }
 
     private fun openCamera() {

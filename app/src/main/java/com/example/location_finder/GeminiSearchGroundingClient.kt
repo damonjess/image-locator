@@ -16,11 +16,8 @@ object GeminiSearchGroundingClient {
 
     private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
-    private val MODELS_TO_TRY = listOf(
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-8b"
-    )
+    /** Models tried in order; the first that answers wins. Shared with [GeminiClient] via [GeminiModels]. */
+    private val MODELS_TO_TRY = GeminiModels.FALLBACK_CHAIN
 
     /**
      * Grounded verification call — only invoke this on demand, not on every photo.

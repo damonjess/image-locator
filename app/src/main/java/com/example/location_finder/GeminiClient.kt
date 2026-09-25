@@ -16,11 +16,8 @@ object GeminiClient {
 
     private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
-    private val MODELS_TO_TRY = listOf(
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-8b"
-    )
+    /** Models tried in order; the first that answers wins. Shared with [GeminiSearchGroundingClient] via [GeminiModels]. */
+    private val MODELS_TO_TRY = GeminiModels.FALLBACK_CHAIN
 
     /**
      * Calls Gemini API to analyze the image and generate content.
