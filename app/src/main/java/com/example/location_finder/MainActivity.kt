@@ -405,20 +405,37 @@ class MainActivity : AppCompatActivity() {
     // Gemini calls
     // -----------------------------------------------------------------------
 
+    /**
+     * Downscale large images so the base64 payload is lightweight and uploads
+     * fast without hitting Gemini payload limits.
+     */
+    private fun downscaleBitmap(bitmap: Bitmap, maxDimension: Int = 1024): Bitmap {
+        val width = bitmap.width
+        val height = bitmap.height
+        val maxEdge = maxOf(width, height)
+        if (maxEdge <= maxDimension) return bitmap
+
+        val scale = maxDimension.toFloat() / maxEdge
+        val newWidth = (width * scale).toInt()
+        val newHeight = (height * scale).toInt()
+        return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+    }
+
     private fun askGeminiForLocation(bitmap: Bitmap) {
         lifecycleScope.launch(Dispatchers.IO) {
+            val scaledBitmap = downscaleBitmap(bitmap)
             try {
                 val rawText = try {
                     GeminiSearchGroundingClient.generateContentWithSearch(
                         apiKey = geminiApiKey,
-                        bitmap = bitmap,
+                        bitmap = scaledBitmap,
                         promptText = prompt
                     ).trim()
                 } catch (groundingError: Exception) {
                     Log.w("MainActivity", "Grounded search failed/quota exceeded, falling back to ungrounded model: ${groundingError.message}")
                     GeminiClient.generateContent(
                         apiKey = geminiApiKey,
-                        bitmap = bitmap,
+                        bitmap = scaledBitmap,
                         promptText = prompt
                     ).trim()
                 }
@@ -445,10 +462,11 @@ class MainActivity : AppCompatActivity() {
      */
     private fun verifyLocation(bitmap: Bitmap, baseline: GeminiLocationResult) {
         lifecycleScope.launch(Dispatchers.IO) {
+            val scaledBitmap = downscaleBitmap(bitmap)
             try {
                 val rawText = GeminiClient.generateContent(
                     apiKey = geminiApiKey,
-                    bitmap = bitmap,
+                    bitmap = scaledBitmap,
                     promptText = verifyPrompt
                 ).trim()
 
@@ -882,7 +900,14 @@ class MainActivity : AppCompatActivity() {
                 val exif = ExifInterface(input)
                 val latLong = FloatArray(2)
                 if (exif.getLatLong(latLong)) {
-                    GeoPoint(latLong[0].toDouble(), latLong[1].toDouble())
+                    val lat = latLong[0].toDouble()
+                    val lon = latLong[1].toDouble()
+                    // Filter out null island / placeholder coordinates
+                    if (lat == 0.0 && lon == 0.0) {
+                        null
+                    } else {
+                        GeoPoint(lat, lon)
+                    }
                 } else {
                     null
                 }
