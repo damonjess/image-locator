@@ -2,6 +2,7 @@ package com.example.location_finder
 
 import android.Manifest
 import android.app.AlertDialog
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -31,6 +32,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 
 import kotlinx.coroutines.Dispatchers
@@ -97,6 +99,10 @@ class MainActivity : AppCompatActivity() {
     /** First-pass structured result from the last successful lookup — the baseline Verify cross-checks against. */
     private var lastGeminiResult: GeminiLocationResult? = null
 
+    private var lastResolvedLocation: ResolvedLocation? = null
+    private var lastResolvedTitle: String? = null
+    private lateinit var btnOpenMaps: ExtendedFloatingActionButton
+
     private val reliableStreetSource = object : XYTileSource(
         "OSMStandard",
         0, 19, 256, ".png",
@@ -149,7 +155,15 @@ class MainActivity : AppCompatActivity() {
         cameraOverlay = findViewById(R.id.cameraOverlay)
         previewView = findViewById(R.id.cameraPreviewView)
         mapView = findViewById(R.id.mapView)
+        btnOpenMaps = findViewById(R.id.btnOpenMaps)
         cameraExecutor = Executors.newSingleThreadExecutor()
+
+        btnOpenMaps.setOnClickListener {
+            val resolved = lastResolvedLocation
+            if (resolved != null) {
+                openInGoogleMaps(resolved.point.latitude, resolved.point.longitude, lastResolvedTitle)
+            }
+        }
 
         mapView.setTileSource(reliableStreetSource)
         mapView.setMultiTouchControls(true)
@@ -295,6 +309,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnSelectPhoto).isEnabled = enabled
         findViewById<Button>(R.id.btnVerify).isEnabled = enabled
         findViewById<Button>(R.id.btnCamera).isEnabled = enabled
+        btnOpenMaps.isEnabled = enabled
     }
 
     /**
@@ -1151,6 +1166,10 @@ class MainActivity : AppCompatActivity() {
     // -----------------------------------------------------------------------
 
     private fun plotOnMap(resolved: ResolvedLocation, title: String, description: String) {
+        lastResolvedLocation = resolved
+        lastResolvedTitle = title
+        btnOpenMaps.visibility = View.VISIBLE
+
         mapView.overlays.clear()
 
         val displayTitle = if (resolved.isApproximate) "$title (approximate)" else title
@@ -1182,7 +1201,33 @@ class MainActivity : AppCompatActivity() {
                 (if (resolved.isApproximate) "\n\nNote: This is an approximate location." else "")
             )
             .setPositiveButton("OK", null)
+            .setNeutralButton("Open in Google Maps") { _, _ ->
+                openInGoogleMaps(resolved.point.latitude, resolved.point.longitude, title)
+            }
             .show()
+    }
+
+    /**
+     * Launch Google Maps to display the specified location coordinates.
+     * Uses the official Google Maps package if installed, with a web browser fallback.
+     */
+    private fun openInGoogleMaps(latitude: Double, longitude: Double, label: String? = null) {
+        val encodedLabel = if (!label.isNullOrBlank()) "(${Uri.encode(label)})" else ""
+        val uriString = "geo:$latitude,$longitude?q=$latitude,$longitude$encodedLabel"
+        val mapIntent = Intent(Intent.ACTION_VIEW, Uri.parse(uriString)).apply {
+            setPackage("com.google.android.apps.maps")
+        }
+        try {
+            startActivity(mapIntent)
+        } catch (e: Exception) {
+            val webUri = Uri.parse("https://www.google.com/maps/search/?api=1&query=$latitude,$longitude")
+            val webIntent = Intent(Intent.ACTION_VIEW, webUri)
+            try {
+                startActivity(webIntent)
+            } catch (ex: Exception) {
+                Toast.makeText(this, "Could not open map application.", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     override fun onResume() {

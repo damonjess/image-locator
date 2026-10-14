@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">location-finder</string>
     <string name="select_photo_from_gallery">Select Photo from Gallery</string>
+    <string name="open_in_google_maps">Open in Google Maps</string>
 </resources>
