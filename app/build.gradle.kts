@@ -84,6 +84,9 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:${camerax_version}")
     implementation("androidx.camera:camera-view:${camerax_version}")
 
+    // On-device OCR for signs, logos, captions, and social-media overlays
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+
     // Google AI Gemini SDK for visual location recognition
     implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
 

@@ -36,6 +36,15 @@ class GeminiRetryTest {
     }
 
     @Test
+    fun notRetryable_billingQuotaExhausted_failsFast() {
+        assertFalse(
+            GeminiRetry.isRetryable(
+                RuntimeException("You exceeded your current quota, please check your plan and billing details.")
+            )
+        )
+    }
+
+    @Test
     fun retryable_serverErrors_areRetryable() {
         assertTrue(GeminiRetry.isRetryable(RuntimeException("HTTP 503: Service Unavailable")))
         assertTrue(GeminiRetry.isRetryable(RuntimeException("500 Internal Server Error")))

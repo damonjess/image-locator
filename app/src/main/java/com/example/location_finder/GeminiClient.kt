@@ -30,7 +30,7 @@ object GeminiClient {
         promptText: String
     ): String {
         val outputStream = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
         val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
         val payload = JSONObject().apply {
@@ -49,14 +49,50 @@ object GeminiClient {
                     })
                 })
             })
-            // Low temperature for deterministic, factual location identification
+            // Low temperature for deterministic, factual location identification.
+            // Use a generous maxOutputTokens budget because Gemini 3.x thinking models
+            // count internal thoughtsTokenCount (~3,500+ tokens) against maxOutputTokens;
+            // a 4,096 cap truncates the visible JSON mid-sentence before the closing brace.
             put("generationConfig", JSONObject().apply {
                 put("temperature", 0.3)
                 put("topP", 0.95)
-                put("maxOutputTokens", 4096)
+                put("maxOutputTokens", 16384)
             })
         }
 
+        return executeAcrossModels(apiKey, payload)
+    }
+
+    /**
+     * Text-only Gemini call used to structure grounded prose responses into
+     * the app's strict JSON location schema when Google Search grounding
+     * replies in natural language instead of JSON.
+     */
+    suspend fun generateTextContent(
+        apiKey: String,
+        promptText: String
+    ): String {
+        val payload = JSONObject().apply {
+            put("contents", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("parts", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("text", promptText)
+                        })
+                    })
+                })
+            })
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.1)
+                put("topP", 0.95)
+                put("maxOutputTokens", 8192)
+            })
+        }
+
+        return executeAcrossModels(apiKey, payload)
+    }
+
+    private suspend fun executeAcrossModels(apiKey: String, payload: JSONObject): String {
         var lastException: Exception? = null
         for (model in MODELS_TO_TRY) {
             try {
@@ -68,6 +104,7 @@ object GeminiClient {
                     }
                 }
             } catch (e: Exception) {
+                Log.w("GeminiClient", "Model $model failed: ${e.message}")
                 lastException = e
             }
         }
@@ -118,14 +155,6 @@ object GeminiClient {
         val parts = content.optJSONArray("parts")
             ?: throw RuntimeException("No parts in candidate content")
 
-        val sb = StringBuilder()
-        for (i in 0 until parts.length()) {
-            val part = parts.getJSONObject(i)
-            if (part.has("text")) {
-                sb.append(part.getString("text"))
-            }
-        }
-
-        return sb.toString()
+        return LocationResponseParser.extractCandidateText(parts)
     }
 }

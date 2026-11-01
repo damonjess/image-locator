@@ -235,4 +235,35 @@ class LocationCrossCheckTest {
         assertEquals(LocationCrossCheck.Verdict.CONFIRMED, outcome.verdict)
         assertNull(outcome.eliminationReasoning)
     }
+
+    @Test
+    fun bartonCentralSurgery_minorTitleVariant_isConfirmed() {
+        val first = GeminiLocationResult(
+            title = "Central Surgery, Barton-upon-Humber",
+            description = "Doctors surgery on King Street",
+            confidence = "high",
+            latitude = 53.6838,
+            longitude = -0.4400,
+            street = "King Street",
+            city = "Barton-upon-Humber",
+            region = "North Lincolnshire",
+            country = "United Kingdom",
+            countryCode = "gb",
+            postcode = "DN18 5ER",
+            searchQuery = "Central Surgery, King Street, Barton-upon-Humber, North Lincolnshire, DN18 5ER, United Kingdom"
+        )
+        val second = org.json.JSONObject(
+            """
+            {"title": "Barton Central Surgery, Barton-upon-Humber", "city": "Barton upon Humber",
+             "region": "North Lincolnshire", "country": "United Kingdom", "confidence": "high",
+             "latitude": 53.6838, "longitude": -0.4400}
+            """.trimIndent()
+        )
+        val outcome = LocationCrossCheck.compare(
+            first,
+            second,
+            secondPoint = org.osmdroid.util.GeoPoint(53.6838, -0.4400)
+        )
+        assertEquals(LocationCrossCheck.Verdict.CONFIRMED, outcome.verdict)
+    }
 }

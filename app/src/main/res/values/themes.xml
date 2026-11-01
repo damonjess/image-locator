@@ -1,5 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-
-    <style name="Theme.Locationfinder" parent="Theme.Material3.DayNight.NoActionBar" />
+    <style name="Theme.Locationfinder" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/forest_700</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorPrimaryContainer">@color/mint_100</item>
+        <item name="colorOnPrimaryContainer">@color/ink_900</item>
+        <item name="colorSecondary">@color/forest_800</item>
+        <item name="colorSurface">@color/paper_50</item>
+        <item name="colorOnSurface">@color/ink_900</item>
+        <item name="colorOutline">@color/outline_300</item>
+        <item name="android:colorAccent">@color/forest_700</item>
+        <item name="android:statusBarColor">@color/paper_50</item>
+        <item name="android:navigationBarColor">@color/paper_50</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
 </resources>

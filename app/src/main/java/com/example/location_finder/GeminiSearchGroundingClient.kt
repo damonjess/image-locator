@@ -30,7 +30,7 @@ object GeminiSearchGroundingClient {
         promptText: String
     ): String {
         val outputStream = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
         val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
         val payload = JSONObject().apply {
@@ -49,11 +49,12 @@ object GeminiSearchGroundingClient {
                     })
                 })
             })
-            // Low temperature for deterministic, factual location identification
+            // Low temperature for deterministic, factual location identification.
+            // Use 16,384 maxOutputTokens so thinking tokens do not truncate the JSON output.
             put("generationConfig", JSONObject().apply {
                 put("temperature", 0.3)
                 put("topP", 0.95)
-                put("maxOutputTokens", 4096)
+                put("maxOutputTokens", 16384)
             })
             put("tools", JSONArray().apply {
                 put(JSONObject().apply {
@@ -73,7 +74,53 @@ object GeminiSearchGroundingClient {
                     }
                 }
             } catch (e: Exception) {
+                Log.w("GeminiSearchGroundingClient", "Grounded model $model failed: ${e.message}")
                 lastException = e
+                val msg = (e.message ?: "").lowercase()
+                if (msg.contains("exceeded your current quota") || msg.contains("billing details")) {
+                    // Search grounding tool quota is exhausted across the project; fail fast to ungrounded fallback
+                    break
+                }
+            }
+        }
+        throw lastException ?: RuntimeException("All Gemini models failed to process request.")
+    }
+
+    /**
+     * Search grounded text-only investigation. Useful after vision extracts
+     * names or captions that should be searched independently of the image.
+     */
+    suspend fun generateTextWithSearch(apiKey: String, promptText: String): String {
+        val payload = JSONObject().apply {
+            put("contents", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("parts", JSONArray().apply { put(JSONObject().put("text", promptText)) })
+                })
+            })
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.2)
+                put("topP", 0.95)
+                put("maxOutputTokens", 16384)
+            })
+            put("tools", JSONArray().apply {
+                put(JSONObject().put("googleSearch", JSONObject()))
+            })
+        }
+
+        var lastException: Exception? = null
+        for (model in MODELS_TO_TRY) {
+            try {
+                val requestUrl = "$BASE_URL/$model:generateContent?key=$apiKey"
+                return withContext(Dispatchers.IO) {
+                    GeminiRetry.withRetries { executePostRequest(requestUrl, payload) }
+                }
+            } catch (e: Exception) {
+                Log.w("GeminiSearchGroundingClient", "Grounded text model $model failed: ${e.message}")
+                lastException = e
+                val msg = (e.message ?: "").lowercase()
+                if (msg.contains("exceeded your current quota") || msg.contains("billing details")) {
+                    break
+                }
             }
         }
         throw lastException ?: RuntimeException("All Gemini models failed to process request.")
@@ -85,7 +132,7 @@ object GeminiSearchGroundingClient {
             requestMethod = "POST"
             doOutput = true
             connectTimeout = 15000
-            readTimeout = 30000
+            readTimeout = 35000
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
         }
 
@@ -116,11 +163,6 @@ object GeminiSearchGroundingClient {
         val parts = content.optJSONArray("parts")
             ?: throw RuntimeException("No parts in candidate content")
 
-        val sb = StringBuilder()
-        for (i in 0 until parts.length()) {
-            val part = parts.getJSONObject(i)
-            if (part.has("text")) sb.append(part.getString("text"))
-        }
-        return sb.toString()
+        return LocationResponseParser.extractCandidateText(parts)
     }
 }

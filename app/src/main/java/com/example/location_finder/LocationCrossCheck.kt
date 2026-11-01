@@ -43,11 +43,9 @@ object LocationCrossCheck {
      * Compare the first pass with the second pass's JSON verdict.
      *
      * Agreement rules (in order):
-     * - both give coordinates and they're within 2 km -> CONFIRMED
-     * - town names match but coordinates are further apart -> CLOSE_MATCH
-     *   (town-level agreement, landmark-level disagreement)
-     * - anything else (different towns, coordinates kilometres apart)
-     *   -> DISPUTED
+     * - normalized town and place names match, and coordinates are within 2 km -> CONFIRMED
+     * - the same town and place are named but coordinates are further apart or missing -> CLOSE_MATCH
+     * - towns or place names differ, or the result cannot be corroborated -> DISPUTED
      */
     fun compare(first: GeminiLocationResult, second: JSONObject, secondPoint: GeoPoint?): CrossCheckResult {
         val secondResult = parseSecondPass(second)
@@ -69,12 +67,31 @@ object LocationCrossCheck {
         secondResult.confidence?.let { evidence.add("Second analysis confidence: $it") }
         firstTownRaw?.let { evidence.add("First pass town/area: $it") }
 
-        // Distance comparison when both passes gave coordinates.
+        val firstPlace = normalizePlaceName(first.title, firstTown)
+        val secondPlace = normalizePlaceName(secondResult.title, secondTown)
+        val townsDisagree = firstTown != null && secondTown != null && firstTown != secondTown
+        val placesMatch = placesAgree(firstPlace, secondPlace)
+        val placesDisagree = firstPlace != null && secondPlace != null && !placesMatch
+        if (townsDisagree || placesDisagree) {
+            return CrossCheckResult(
+                Verdict.DISPUTED,
+                evidence,
+                secondPoint,
+                false,
+                secondResult.confidence,
+                secondResult.title,
+                secondResult.elimination,
+                "Disputed — the independent analyses identify different places."
+            )
+        }
+
+        // Distance comparison only follows agreement on both town and place name.
         if (secondPoint != null && first.latitude != null && first.longitude != null) {
             val distanceKm = haversineKm(first.latitude, first.longitude, secondPoint.latitude, secondPoint.longitude)
             evidence.add("Distance between the two analyses: ${formatDistance(distanceKm)}")
 
-            if (distanceKm <= COORDINATE_AGREEMENT_KM) {
+            val townAndPlaceMatch = firstTown != null && secondTown != null && placesMatch
+            if (distanceKm <= COORDINATE_AGREEMENT_KM && townAndPlaceMatch) {
                 return CrossCheckResult(
                     Verdict.CONFIRMED,
                     evidence,
@@ -88,9 +105,8 @@ object LocationCrossCheck {
             }
         }
 
-        // Town-level agreement: same town but coordinates (or missing coords)
-        // disagree beyond the threshold — landmark-level mismatch.
-        if (secondTown != null && firstTown != null && secondTown == firstTown) {
+        // Same named place and town but coordinates differ: retain only town-level certainty.
+        if (secondTown != null && firstTown != null) {
             return CrossCheckResult(
                 Verdict.CLOSE_MATCH,
                 evidence,
@@ -99,7 +115,7 @@ object LocationCrossCheck {
                 secondResult.confidence,
                 secondResult.title,
                 secondResult.elimination,
-                "Partly verified — same town, different exact spot. Check the details."
+                "Partly verified — same town, different exact spot. Showing the town centre only."
             )
         }
 
@@ -129,6 +145,35 @@ object LocationCrossCheck {
         eliminationReasoning = eliminationReasoning,
         headline = "Unverified — second analysis could not identify the location"
     )
+
+    /** Normalize the main venue/landmark name, excluding any locality after a comma or town tokens. */
+    internal fun normalizePlaceName(raw: String?, normalizedTown: String? = null): String? {
+        if (raw.isNullOrBlank()) return null
+        var cleaned = raw.substringBefore(',')
+            .lowercase()
+            .replace(Regex("[^a-z0-9\\s]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .removePrefix("the ")
+        if (!normalizedTown.isNullOrBlank()) {
+            val townTokens = normalizedTown.split(" ").filter { it.isNotBlank() }.toSet()
+            val stripped = cleaned.split(" ")
+                .filter { it !in townTokens }
+                .joinToString(" ")
+                .trim()
+            if (stripped.isNotEmpty()) {
+                cleaned = stripped
+            }
+        }
+        return cleaned.ifEmpty { null }
+    }
+
+    private fun placesAgree(firstPlace: String?, secondPlace: String?): Boolean {
+        if (firstPlace == null || secondPlace == null) return false
+        if (firstPlace == secondPlace) return true
+        if (firstPlace.contains(secondPlace) || secondPlace.contains(firstPlace)) return true
+        return false
+    }
 
     /** Loose town comparison: lowercase, strip "city of", punctuation, whitespace. */
     internal fun normalizeTown(raw: String?): String? {

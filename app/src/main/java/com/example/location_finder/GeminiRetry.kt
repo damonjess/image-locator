@@ -54,6 +54,12 @@ object GeminiRetry {
         if (e is SocketTimeoutException || e is IOException) return true
 
         val message = (e.message ?: "").lowercase()
+        // Plan/billing quota exhaustion (e.g. free-tier Google Search grounding tool quota = 0)
+        // will not succeed after a 1-2s retry; fail fast so the caller can fall back immediately.
+        if (message.contains("exceeded your current quota") || message.contains("billing details")) {
+            return false
+        }
+
         return message.contains("overload") ||
             message.contains("overloaded") ||
             message.contains("high demand") ||
