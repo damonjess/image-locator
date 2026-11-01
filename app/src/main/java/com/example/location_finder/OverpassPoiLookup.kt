@@ -66,25 +66,22 @@ object OverpassPoiLookup {
             ?: return null
         val landmarkName = landmarkNameFromTitle(result.title, result.city) ?: return null
 
-        // Try a tight radius around the estimated position first, then widen.
-        for (radiusMeters in intArrayOf(2_000, 5_000)) {
-            val xml = try {
-                executeQuery(buildOverpassQuery(landmarkName, center, radiusMeters))
-            } catch (e: Exception) {
-                Log.w(TAG, "Overpass landmark query failed", e)
-                return null
-            }
-            val pois = parseOverpassResponse(xml)
-            val best = pickBestPoi(pois, landmarkName, center) ?: continue
-
-            return ResolvedLocation(
-                point = best.first.point,
-                source = "OpenStreetMap landmark (Overpass)",
-                isApproximate = best.second < EXACT_MATCH_SCORE,
-                displayAddress = best.first.name
-            )
+        // Query Overpass within a 5 km radius around the estimated position.
+        val xml = try {
+            executeQuery(buildOverpassQuery(landmarkName, center, 5_000))
+        } catch (e: Exception) {
+            Log.w(TAG, "Overpass landmark query failed", e)
+            return null
         }
-        return null
+        val pois = parseOverpassResponse(xml)
+        val best = pickBestPoi(pois, landmarkName, center) ?: return null
+
+        return ResolvedLocation(
+            point = best.first.point,
+            source = "OpenStreetMap landmark (Overpass)",
+            isApproximate = best.second < EXACT_MATCH_SCORE,
+            displayAddress = best.first.name
+        )
     }
 
     // -----------------------------------------------------------------------
@@ -308,10 +305,10 @@ object OverpassPoiLookup {
     }
 
     /** Total time budget for the whole Overpass step across all endpoints. */
-    private const val TOTAL_BUDGET_MS = 25_000L
+    private const val TOTAL_BUDGET_MS = 8_000L
 
     /** Per-request read timeout — kept short so a dead mirror doesn't eat the budget. */
-    private const val READ_TIMEOUT_MS = 12_000
+    private const val READ_TIMEOUT_MS = 5_000
 
     /**
      * POST the query to Overpass, trying the primary endpoint then mirrors,
@@ -326,7 +323,7 @@ object OverpassPoiLookup {
             try {
                 val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
-                    connectTimeout = 8_000
+                    connectTimeout = 3_000
                     readTimeout = READ_TIMEOUT_MS
                     doOutput = true
                     setRequestProperty("Content-Type", "application/x-www-form-urlencoded")

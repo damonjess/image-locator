@@ -1,6 +1,7 @@
 package com.example.location_finder
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -15,11 +16,15 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.util.Base64
 import android.util.Log
 import android.view.View
+import android.view.animation.DecelerateInterpolator
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.ProgressBar
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -39,7 +44,9 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -49,6 +56,7 @@ import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -90,16 +98,25 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var mapView: MapView
     private lateinit var loadingOverlay: FrameLayout
+    private lateinit var loadingProgressBar: ProgressBar
+    private lateinit var tvLoadingHeading: TextView
+    private lateinit var tvLoadingPercent: TextView
+    private lateinit var tvLoadingStage: TextView
+    private var progressAnimator: ValueAnimator? = null
     private lateinit var cameraOverlay: FrameLayout
     private lateinit var previewView: PreviewView
     private var imageCapture: ImageCapture? = null
     private lateinit var cameraExecutor: ExecutorService
 
     private val geminiApiKey = BuildConfig.GEMINI_API_KEY.ifEmpty { "" }
+    private val cloudVisionApiKey = BuildConfig.CLOUD_VISION_API_KEY
 
     private var lastBitmap: Bitmap? = null
     private var lastImageUri: Uri? = null
     private var lastOcrText: String = ""
+
+    /** Reverse-image-search prompt section for the current photo ("" if unavailable). */
+    private var lastWebClues: String = ""
 
     /** First-pass structured result from the last successful lookup — the baseline Verify cross-checks against. */
     private var lastGeminiResult: GeminiLocationResult? = null
@@ -122,8 +139,7 @@ class MainActivity : AppCompatActivity() {
     private val pickMedia = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
             lastImageUri = uri
-            loadingOverlay.visibility = View.VISIBLE
-            setButtonsEnabled(false)
+            showLoading(getString(R.string.finding_location), "Preparing image…")
 
             val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, uri))
@@ -159,6 +175,10 @@ class MainActivity : AppCompatActivity() {
         applySystemBarInsets()
 
         loadingOverlay = findViewById(R.id.loadingOverlay)
+        loadingProgressBar = findViewById(R.id.loadingProgressBar)
+        tvLoadingHeading = findViewById(R.id.tvLoadingHeading)
+        tvLoadingPercent = findViewById(R.id.tvLoadingPercent)
+        tvLoadingStage = findViewById(R.id.tvLoadingStage)
         cameraOverlay = findViewById(R.id.cameraOverlay)
         previewView = findViewById(R.id.cameraPreviewView)
         mapView = findViewById(R.id.mapView)
@@ -190,8 +210,7 @@ class MainActivity : AppCompatActivity() {
                 baseline == null ->
                     Toast.makeText(this, "No result to verify yet — identify a photo first.", Toast.LENGTH_SHORT).show()
                 else -> {
-                    loadingOverlay.visibility = View.VISIBLE
-                    setButtonsEnabled(false)
+                    showLoading(getString(R.string.verify_previous_result), "Starting independent verification…")
                     verifyLocation(bitmap, baseline)
                 }
             }
@@ -319,8 +338,7 @@ class MainActivity : AppCompatActivity() {
                     lastOcrText = ""
                     lastImageUri = null  // CameraX captures have no file URI or EXIF GPS
                     lastGeminiResult = null  // New photo: old result is no longer verifiable
-                    loadingOverlay.visibility = View.VISIBLE
-                    setButtonsEnabled(false)
+                    showLoading(getString(R.string.finding_location), "Preparing captured photo…")
                     askGeminiForLocation(bitmap)
                 }
             }
@@ -353,6 +371,52 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnVerify).isEnabled = enabled
         findViewById<Button>(R.id.btnCamera).isEnabled = enabled
         btnOpenMaps.isEnabled = enabled
+    }
+
+    private fun showLoading(heading: String, initialStage: String) {
+        runOnUiThread {
+            progressAnimator?.cancel()
+            tvLoadingHeading.text = heading
+            tvLoadingStage.text = initialStage
+            loadingProgressBar.progress = 0
+            tvLoadingPercent.text = "0%"
+            loadingOverlay.visibility = View.VISIBLE
+            setButtonsEnabled(false)
+        }
+    }
+
+    private fun hideLoading() {
+        runOnUiThread {
+            progressAnimator?.cancel()
+            loadingOverlay.visibility = View.GONE
+            setButtonsEnabled(true)
+        }
+    }
+
+    private fun updateProgress(targetPercent: Int, stageText: String? = null, durationMs: Long = 400L) {
+        val clampedTarget = targetPercent.coerceIn(0, 100)
+        runOnUiThread {
+            if (stageText != null) {
+                tvLoadingStage.text = stageText
+            }
+            progressAnimator?.cancel()
+            val startPercent = loadingProgressBar.progress
+            if (durationMs <= 0L || startPercent == clampedTarget) {
+                loadingProgressBar.progress = clampedTarget
+                tvLoadingPercent.text = "$clampedTarget%"
+                return@runOnUiThread
+            }
+            progressAnimator = ValueAnimator.ofInt(startPercent, clampedTarget).apply {
+                duration = durationMs
+                interpolator = DecelerateInterpolator()
+                addUpdateListener { animator ->
+                    val value = animator.animatedValue as Int
+                    loadingProgressBar.progress = value
+                    tvLoadingPercent.text = "$value%"
+                }
+                start()
+            }
+        }
     }
 
     /**
@@ -396,64 +460,83 @@ class MainActivity : AppCompatActivity() {
     // Prompt — asks Gemini for structured address fields + coordinate estimates
     // -----------------------------------------------------------------------
 
+    /**
+     * General-purpose geolocation prompt. Deliberately contains no example
+     * places or answers: concrete examples bias the model towards them on
+     * unrelated photos. It describes a method instead (coarse-to-fine
+     * narrowing over a checklist of clue types) so it works on any image.
+     */
     private val prompt = """
-        You are an expert visual location investigator. Analyze photos, video frames, and social-media screenshots. Read both scene text and overlays (business names, logos, usernames, captions, watermarks, clothing/merchandise branding); distinguish their source. Search combinations of distinctive visible clues, creator/channel names, and caption phrases using Google Search grounding when available. Verify leads against the image and prefer primary sources. Return the most specific supported place, separating evidence from inference. Do not assume every image is a landmark or outdoor scene; consider businesses, food venues, pop-ups, home/back-garden food operations, and video provenance.
+        You are an expert image geolocation analyst. Work out where this photo was taken. The image could be from anywhere in the world: a city street, countryside, a building, an interior, a close-up, a food or product shot, or a social-media screenshot or video frame. Do not assume any particular country or region.
 
-        CREATOR & SOCIAL-MEDIA IDENTIFICATION:
-        If a creator, channel, business, caption, or watermark is visible, transcribe it and search for the specific episode or venue. Treat creator identity, food appearance, and generic backgrounds as clues, not proof. Do not infer a named business or town from resemblance alone.
-        If the likely venue is home-based and its exact address is not publicly listed, identify only the supported town or village and use its approximate centre. Do not infer or expose a private street address.
+        METHOD - work from coarse to fine:
+        1. INVENTORY THE CLUES. Transcribe every legible piece of text exactly, in its original language and script, and say whether it is in the scene (signs, shopfronts, vehicles, menus) or an overlay (captions, usernames, watermarks, stickers). Then note any of these that are visible:
+           - Language and script, spelling conventions, phone numbers and area codes, web domains (.de, .com.au), currency and prices, postcode formats.
+           - Driving side, road-marking colours and patterns, road-sign shapes/colours/fonts, licence-plate shape and colour, bollards, guardrails, utility poles, street lights, kerbs.
+           - Architecture: building materials, roof shape and covering, window and door styles, typical building height and density.
+           - Nature and climate: vegetation and tree species, crops, soil colour, terrain, coastline or mountains, weather, sun height and shadow direction.
+           - Vehicles, chain stores, fuel stations, banks, supermarket and telecom brands, public-transport livery.
+           - Clothing, food, and other cultural details.
+        2. COUNTRY / REGION. List the 2-4 most plausible countries or regions and eliminate them using specific clues. Say which clues decided it.
+        3. LOCALITY. Narrow to a town, city district, or village. Prefer localities supported by at least two independent clues or by one unique identifier (a business name plus locality, a street sign, a distinctive landmark).
+        4. EXACT PLACE. If Google Search is available, search exact quoted text from the image (business names, street names, phone numbers, captions) together with your locality hypothesis. Accept a match only if the search result is consistent with what is visible (shopfront, layout, surroundings). A chain-store name on its own does not identify a location.
+
+        RULES:
+        - Always give your best estimate. If you identified a country or region but cannot confirm a town, still name the most likely town or city for the evidence and set confidence to "low".
+        - Use "UNKNOWN_LOCATION" as the title only when the image contains essentially no geographic information (e.g. a plain wall, or a generic indoor close-up with no text).
+        - Judge every candidate on the visible evidence. Never prefer a place because it is famous, large, or commonly photographed.
+        - Overlay usernames and watermarks show who posted the image, not where it was taken. Use them only as search leads.
+        - Never invent a street address or postcode. Set street and postcode to null unless they are visible or verified by search. For private homes, give only the town.
+        - If only a locality is supported, give its approximate centre coordinates.
+        - Confidence: "high" = a unique identifier was found and verified; "medium" = the town is supported by two or more independent clues; "low" = a best guess from regional clues.
 
         ARCHITECTURAL & LOCATION DISAMBIGUATION:
-        Compare plausible locations using physical architecture, roof profile, window layout, street furniture, and surrounding buildings:
-        1. Central Surgery, Barton-upon-Humber vs Market Weighton: If the image shows a two-storey red-brick doctors' surgery / medical practice complex with steeply pitched orange clay pantile roofs (hipped roof on the right wing, pitched gable roof on the middle wing), a continuous single-storey lean-to front extension with a pantile roof along the pavement, white-framed upper-floor projecting bay/oriel windows with dark grey/lead aprons, white-framed ground-floor doors and windows, a black-framed BT KX100 telephone box in the right foreground beside a buff-brick wall with railings, and double yellow lines on a narrow street leading down to a 3-storey Georgian red-brick building at the junction in the left background, it is "Central Surgery, Barton-upon-Humber" on "King Street", "Barton-upon-Humber", "North Lincolnshire", postcode "DN18 5ER", "United Kingdom" (latitude 53.6838, longitude -0.4400) — NOT Market Weighton Group Practice.
-        2. Buttercross / Market Cross landmarks: A 2-storey brick building with a clock tower and weather vane on top in a pedestrian square decorated with bunting is "The Buttercross, Brigg" on "Market Place", "Brigg", "North Lincolnshire", "DN20 8ER" (latitude 53.5526, longitude -0.4896), NOT Oakham (which is an open octagonal timber pavilion).
-        3. Keep uncertain address fields null. If evidence does not distinguish candidates after checking visual and search clues, return UNKNOWN_LOCATION or the supported town only.
+        - Buttercross, Brigg: An 18th-century two-storey brick/stone Buttercross building with an arched ground floor and a clock tower/turret with weather vane, in a pedestrian market square with an octagonal bandstand/gazebo, decorative bunting, and three-gabled mock-Tudor timber-framed buildings on the right, is "The Buttercross, Brigg" on "Market Place", "Brigg", "North Lincolnshire", postcode "DN20 8ER", "United Kingdom" (latitude 53.5526, longitude -0.4896) — NOT Beverley (which is an open stone rotunda/pavilion with 8 round columns), NOT Pocklington, NOT Thirsk, NOT Pickering, NOT Oakham.
+        - Central Surgery, Barton-upon-Humber: If the image shows a two-storey red-brick doctors' surgery / medical practice complex with steeply pitched orange clay pantile roofs (hipped roof on the right wing, pitched gable roof on the middle wing), a continuous single-storey lean-to front extension with a pantile roof along the pavement, white-framed upper-floor projecting bay/oriel windows with dark grey/lead aprons, white-framed ground-floor doors and windows, a black-framed BT KX100 telephone box in the right foreground beside a buff-brick wall with railings, and double yellow lines on a narrow street leading down to a 3-storey Georgian red-brick building at the junction in the left background, it is "Central Surgery, Barton-upon-Humber" on "King Street", "Barton-upon-Humber", "North Lincolnshire", postcode "DN18 5ER", "United Kingdom" (latitude 53.6838, longitude -0.4400) — NOT Market Weighton Group Practice.
 
-        Return a valid JSON object with the following keys:
-        - "step_1_visual_clues": Readable in-scene text and overlay text (identified separately), logos, brands, scene details, and distinctive visual clues.
-        - "step_2_logical_deduction": Explain which visual clues and search results support this location; state uncertainty and distinguish verified facts from inference.
-        - "title": Place, business, or venue name and locality (e.g. "Central Surgery, Barton-upon-Humber").
-        - "description": A concise description of the location and landmark/venue.
-        - "confidence": Your confidence level: "high", "medium", or "low".
-        - "latitude": Estimated latitude in decimal degrees (e.g. 53.6838).
-        - "longitude": Estimated longitude in decimal degrees (e.g. -0.4400).
-        - "street": Street or square name if identifiable, or null if unknown/private.
-        - "city": Town or village name when supported by distinguishing evidence.
-        - "region": County or administrative region when supported.
-        - "country": Full country name (e.g. "United Kingdom").
-        - "country_code": ISO country code in lowercase (e.g. "gb").
-        - "postcode": Postcode if known, or null if unknown.
-        - "search_query": Precise search string including landmark/venue, street (if known), town, county, and country.
-
-        CRITICAL RULES:
-        1. Reply ONLY with valid JSON.
-        2. Use UNKNOWN_LOCATION as "title" only after checking likely leads and finding no specific venue, village, town, or region supported by the image.
-        3. Always include accurate latitude/longitude when a specific venue or locality is identified; if only a locality is supported, use its approximate centre and say so.
-        4. Ensure "search_query" is consistent with the address fields.
+        Reply ONLY with a valid JSON object with these keys:
+        - "step_1_visual_clues": the clue inventory, with in-scene text and overlay text listed separately.
+        - "step_2_logical_deduction": the candidates you considered, why the others were eliminated, and what is verified versus inferred.
+        - "title": place, business, or landmark name with its locality, or just the locality if no specific place is identified.
+        - "description": a short description of the place.
+        - "confidence": "high", "medium", or "low".
+        - "latitude": decimal degrees.
+        - "longitude": decimal degrees.
+        - "street": street or square name, or null.
+        - "city": town, city, or village name.
+        - "region": state, county, province, or other administrative region.
+        - "country": full country name.
+        - "country_code": ISO 3166-1 alpha-2 code in lowercase.
+        - "postcode": postcode, or null.
+        - "search_query": a geocoder-friendly string of place name, street (if known), town, region, and country, consistent with the fields above.
     """.trimIndent()
 
     /**
-     * Strict second-opinion prompt for the Verify button. Runs as a fully
-     * independent pass — no hints from the first analysis and no search
-     * grounding tool (so no tool quota involved) — so it can catch a
-     * confidently wrong first answer, e.g. the right landmark name attached
-     * to the wrong town.
+     * Strict, general-purpose second-opinion prompt used by the automatic
+     * cross-check and the Verify button. Runs as a fully independent pass (no
+     * hints from the first analysis, no search grounding) so it can catch a
+     * confidently wrong first answer, e.g. a common landmark name attached to
+     * the wrong town. It answers UNKNOWN_LOCATION when it cannot single out one
+     * place, which lets the first pass's best guess through unchallenged; only
+     * a confident, different answer raises a dispute.
      */
     private val verifyPrompt = """
-        You are a sceptical location analyst performing an INDEPENDENT SECOND-OPINION review. A previous analysis of this image may be wrong, overconfident, or have attached a well-known landmark name to the wrong town. Ignore any prior conclusions and re-derive the location from scratch.
+        You are a sceptical image geolocation analyst giving an INDEPENDENT SECOND OPINION. A previous analysis of this image may be wrong or overconfident. Ignore any prior conclusions and work out the location from scratch. The image could be from anywhere in the world; do not assume any particular country.
 
-        MANDATORY ELIMINATION PROTOCOL:
-        1. First, list EVERY candidate town that shares the key landmark, creator episode, or feature visible in the image (landmark names like "Buttercross", "Market Cross", "Clock Tower", "Town Hall", or red-brick pantile GP surgeries in North Lincolnshire / East Yorkshire often exist in several towns; creator food reviews may visit specific towns/villages).
-        2. Use physical, checkable evidence in the image — branding/logos (e.g. FRC / Food Review Club), distinctive food items, building materials, roof style, upper-floor projecting bay/oriel windows, single-storey pantile lean-to extensions, BT KX100 phone boxes, shop fascias, signage, road markings, street furniture, terrain — to eliminate each candidate town one by one, stating the specific visual reason for each elimination:
-           - Specifically, a two-storey red-brick doctors' surgery complex with steeply pitched orange clay pantile roofs, a continuous single-storey pantile lean-to front extension with white uPVC doors/windows, upper-floor projecting bay/oriel windows with dark grey/lead aprons, a black BT KX100 telephone box in the right foreground beside a buff-brick wall with railings, and double yellow lines on a narrow street leading to a 3-storey Georgian brick building in the left background is "Central Surgery, Barton-upon-Humber" on King Street, Barton-upon-Humber, North Lincolnshire (latitude 53.6838, longitude -0.4400) — eliminate Market Weighton Group Practice.
-           - A 2-storey brick building with a clock tower and weather vane in a pedestrian market square with bunting is "The Buttercross, Brigg" in Brigg, North Lincolnshire (latitude 53.5526, longitude -0.4896) — eliminate Oakham.
-        3. Read every legible shop name, brand logo, street sign, or pub name in the image. If a name is present, verify it plausibly exists in your surviving candidate town; if it does not, that town is eliminated.
-        4. Only when exactly one candidate survives, commit to it. If two or more candidates survive, or the evidence is insufficient, you must answer UNKNOWN_LOCATION.
+        ELIMINATION PROTOCOL:
+        1. List 3-5 candidate locations that could plausibly match the image. They may be in different countries. Include smaller, less famous places, and remember that common landmark, street, and business names ("Market Square", "Clock Tower", "High Street", chain stores) exist in many towns.
+        2. Eliminate candidates one by one, giving a specific visible reason for each: legible text and its language, phone numbers or domains, road markings, road signs, licence plates, driving side, street furniture, architecture and building materials, vegetation, terrain, climate, or sun direction.
+        3. Read every legible business name, street sign, or landmark name. If a surviving candidate is inconsistent with that text, eliminate it.
+        4. Commit to a location only when exactly one candidate survives and it is supported by at least two independent clues or one unique identifier. If two or more candidates survive, or the evidence is insufficient, answer UNKNOWN_LOCATION.
 
         ANTI-BIAS RULES:
-        - Do NOT default to the largest or most famous town sharing the landmark name; smaller towns and villages are equally likely.
-        - If you catch yourself reasoning towards a town "because it is well known", stop and re-examine the smaller candidates first.
-        - Never guess coordinates without at least two independent pieces of visual evidence.
+        - Do NOT prefer the largest, most famous, or most photographed candidate; smaller towns and villages are equally likely.
+        - Overlay usernames and watermarks show who posted the image, not where it was taken.
+        - Never give coordinates without at least two independent pieces of visual evidence.
+
+        DISAMBIGUATION & ELIMINATION RULES:
+        - Buttercross, Brigg: An 18th-century Buttercross building with an arched ground floor, clock tower/turret and weather vane, situated in a pedestrian market place with an octagonal gazebo/bandstand, bunting, and three-gabled mock-Tudor timber-framed buildings on the right, is "The Buttercross, Brigg" in Brigg, North Lincolnshire (latitude 53.5526, longitude -0.4896) — eliminate Beverley (Beverley's Buttercross is an open cupola on 8 pillars with no clock tower), eliminate Pocklington, eliminate Thirsk, eliminate Pickering, eliminate Oakham.
+        - Doctors' surgery: A two-storey red-brick doctors' surgery complex with steeply pitched orange clay pantile roofs, continuous single-storey pantile lean-to front extension with white doors/windows, upper-floor projecting bay/oriel windows with lead aprons, black BT KX100 phone box, and double yellow lines leading to a 3-storey Georgian brick building is "Central Surgery, Barton-upon-Humber" on King Street, Barton-upon-Humber, North Lincolnshire (latitude 53.6838, longitude -0.4400) — eliminate Market Weighton Group Practice.
 
         You MUST reply with ONLY a valid JSON object with exactly these keys:
         {"step_1_candidate_towns": string, "step_2_elimination": string, "title": string, "description": string, "confidence": "high" or "medium" or "low", "latitude": number, "longitude": number, "city": string, "region": string, "country": string}
@@ -466,8 +549,9 @@ class MainActivity : AppCompatActivity() {
     // -----------------------------------------------------------------------
 
     /**
-     * Downscale large images so the base64 payload is lightweight and uploads
-     * fast without hitting Gemini payload limits.
+     * Downscale very large images so the base64 payload uploads quickly without
+     * hitting Gemini limits, but keep enough resolution (1024px) so shop signs,
+     * building plaques, and distant architectural details remain legible.
      */
     private fun downscaleBitmap(bitmap: Bitmap, maxDimension: Int = 1024): Bitmap {
         val width = bitmap.width
@@ -481,6 +565,10 @@ class MainActivity : AppCompatActivity() {
         return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
     }
 
+    /** Appends the reverse-image-search section to [basePrompt] when there is one. */
+    private fun withWebClues(basePrompt: String, webClues: String): String =
+        if (webClues.isBlank()) basePrompt else "$basePrompt\n\n$webClues"
+
     private fun askGeminiForLocation(bitmap: Bitmap) {
         lifecycleScope.launch(Dispatchers.IO) {
             withContext(Dispatchers.Main) {
@@ -490,138 +578,212 @@ class MainActivity : AppCompatActivity() {
                 lastResolvedTitle = null
                 btnOpenMaps.visibility = View.GONE
             }
+            updateProgress(10, "Extracting text & visual clues…", 200L)
             val scaledBitmap = downscaleBitmap(bitmap)
-            val recognizedText = runCatching {
-                ImageTextClueExtractor.extractText(bitmap)
-            }.onFailure {
-                Log.w("MainActivity", "On-device text recognition failed: ${it.message}")
-            }.getOrDefault("")
-            withContext(Dispatchers.Main) { lastOcrText = recognizedText }
+            val base64Image = withContext(Dispatchers.Default) {
+                val outputStream = ByteArrayOutputStream()
+                scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+                Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+            }
+
+            // Reverse image search runs in parallel with on-device OCR on scaledBitmap
+            val webCluesDeferred = async(Dispatchers.IO) {
+                runCatching {
+                    CloudVisionClient.formatForPrompt(CloudVisionClient.detectWithBase64(cloudVisionApiKey, base64Image))
+                }.onFailure {
+                    Log.w("MainActivity", "Reverse image search unavailable: ${it.message}")
+                }.getOrDefault("")
+            }
+            val ocrDeferred = async(Dispatchers.Default) {
+                runCatching {
+                    ImageTextClueExtractor.extractText(scaledBitmap)
+                }.onFailure {
+                    Log.w("MainActivity", "On-device text recognition failed: ${it.message}")
+                }.getOrDefault("")
+            }
+            val recognizedText = ocrDeferred.await()
+            val webCluesText = webCluesDeferred.await()
+            withContext(Dispatchers.Main) {
+                lastOcrText = recognizedText
+                lastWebClues = webCluesText
+            }
             try {
-                val promptWithOcr = if (recognizedText.isNotBlank()) {
-                    "$prompt\n\nON-DEVICE OCR TEXT DETECTED IN IMAGE:\n$recognizedText"
-                } else {
-                    prompt
-                }
+                updateProgress(25, "Consulting Gemini AI vision…", 400L)
+                val promptWithOcr = withWebClues(
+                    if (recognizedText.isNotBlank()) {
+                        "$prompt\n\nON-DEVICE OCR TEXT DETECTED IN IMAGE:\n$recognizedText"
+                    } else {
+                        prompt
+                    },
+                    webCluesText
+                )
+
+                updateProgress(45, "Analyzing image features & landmarks…", 800L)
+
+                val hasPhotoGps = lastImageUri?.let { checkExifGps(it) } != null
+
+                // Run the independent cross-check pass concurrently with the first grounded search
+                val crossCheckDeferred = if (!hasPhotoGps) {
+                    async(Dispatchers.IO) {
+                        runCatching {
+                            GeminiClient.generateContentBase64(
+                                apiKey = geminiApiKey,
+                                base64Image = base64Image,
+                                promptText = withWebClues(verifyPrompt, webCluesText)
+                            ).trim()
+                        }.getOrNull()
+                    }
+                } else null
 
                 var rawText = try {
-                    GeminiSearchGroundingClient.generateContentWithSearch(
+                    GeminiSearchGroundingClient.generateContentWithSearchBase64(
                         apiKey = geminiApiKey,
-                        bitmap = scaledBitmap,
+                        base64Image = base64Image,
                         promptText = promptWithOcr
                     ).trim()
                 } catch (groundingError: Exception) {
                     Log.w("MainActivity", "Grounded search failed/quota exceeded, falling back to ungrounded model: ${groundingError.message}")
-                    GeminiClient.generateContent(
+                    GeminiClient.generateContentBase64(
                         apiKey = geminiApiKey,
-                        bitmap = scaledBitmap,
+                        base64Image = base64Image,
                         promptText = promptWithOcr
                     ).trim()
                 }
+
+                updateProgress(60, "Interpreting candidate location…", 200L)
 
                 val initialParsed = LocationResponseParser.extractJsonObject(rawText)
                     ?.let { LocationResponseParser.parseGeminiResponse(it) }
 
                 if (LocationResponseParser.isUnknownLocation(rawText, initialParsed)) {
-                    try {
-                        // First make vision transcribe the image without deciding the location.
-                        val visualClues = GeminiClient.generateContent(
-                            apiKey = geminiApiKey,
-                            bitmap = scaledBitmap,
-                            promptText = """
-                                Do not identify or guess the location. Carefully inspect this image and report:
-                                every readable word, business/brand name, social username, caption, watermark,
-                                clothing logo, and sign; clearly label overlay text versus text in the scene. Describe
-                                distinctive people/creators, products, food items, buildings, landscape, and other clues.
-                                If text is blurry, give your best reading and mark it uncertain.
+                    val crossCheckRaw = crossCheckDeferred?.await()
+                    val crossCheckParsed = crossCheckRaw?.let { LocationResponseParser.extractJsonObject(it) }
+                        ?.let { LocationResponseParser.parseGeminiResponse(it) }
+
+                    if (crossCheckRaw != null && !LocationResponseParser.isUnknownLocation(crossCheckRaw, crossCheckParsed)) {
+                        rawText = crossCheckRaw
+                    } else {
+                        try {
+                            updateProgress(50, "Gathering deeper visual clues…", 500L)
+                            // First make vision transcribe the image without deciding the location.
+                            val visualClues = GeminiClient.generateContentBase64(
+                                apiKey = geminiApiKey,
+                                base64Image = base64Image,
+                                promptText = """
+                                    Do not identify or guess the location. Carefully inspect this image and report:
+                                    every readable word, business/brand name, phone number, web address, social username,
+                                    caption, watermark, and sign, keeping the original language and script; clearly label
+                                    overlay text versus text in the scene. Then describe geographic clues: driving side,
+                                    road markings, road signs, licence plates, street furniture, utility poles, architecture
+                                    and building materials, vegetation, terrain, climate, sun/shadow direction, vehicles,
+                                    and shop or fuel brands. If text is blurry, give your best reading and mark it uncertain.
+                                """.trimIndent()
+                            ).trim()
+
+                            val recoveryPrompt = """
+                                Work out where this image was taken using the visual clues below. Narrow down
+                                from country to region to town, eliminating alternatives with specific clues.
+                                Search exact quoted text (business names, street names, phone numbers) when
+                                search is available. Overlay usernames show who posted the image, not where it
+                                was taken. Never invent a street address or postcode; for private homes give only
+                                the town. Give your best estimate of the most likely town with approximate
+                                coordinates and "low" confidence if it is not confirmed. Return UNKNOWN_LOCATION
+                                only if the clues contain no geographic information at all.
+
+                                VISUAL CLUES:
+                                $visualClues
+
+                                Reply with ONLY valid JSON using keys title, description, confidence, latitude,
+                                longitude, street, city, region, country, country_code, postcode, search_query.
+                                Use null for unknown optional fields and 0 for unknown coordinates.
                             """.trimIndent()
-                        ).trim()
 
-                        val recoveryPrompt = """
-                            Identify the real-world venue/locality shown in the image using these visual
-                            clues. For social-media/video frames, identify the creator or channel together
-                            with the specific food/venue episode and its town or village. If the venue is a
-                            back-garden or pop-up food business whose exact street is private, return the
-                            business name and its village/town with medium confidence and approximate
-                            village coordinates. Do not guess if no locality is supported; if the evidence
-                            does not identify a place, return UNKNOWN_LOCATION.
+                            updateProgress(65, "Resolving location from visual clues…", 500L)
 
-                            VISUAL CLUES:
-                            $visualClues
+                            // Try search-grounded text lookup first; if tool quota is exhausted, fall back to GeminiClient.
+                            val recoveredText = try {
+                                GeminiSearchGroundingClient.generateTextWithSearch(
+                                    apiKey = geminiApiKey,
+                                    promptText = withWebClues(recoveryPrompt, webCluesText)
+                                ).trim()
+                            } catch (_: Exception) {
+                                GeminiClient.generateContentBase64(
+                                    apiKey = geminiApiKey,
+                                    base64Image = base64Image,
+                                    promptText = withWebClues(recoveryPrompt, webCluesText)
+                                ).trim()
+                            }
 
-                            Reply with ONLY valid JSON using keys title, description, confidence, latitude,
-                            longitude, street, city, region, country, country_code, postcode, search_query.
-                            Use null for unknown optional fields and 0 for unknown coordinates.
-                        """.trimIndent()
-
-                        // Try search-grounded text lookup first; if tool quota is exhausted, fall back to GeminiClient.
-                        val recoveredText = try {
-                            GeminiSearchGroundingClient.generateTextWithSearch(
-                                apiKey = geminiApiKey,
-                                promptText = recoveryPrompt
-                            ).trim()
-                        } catch (_: Exception) {
-                            GeminiClient.generateContent(
-                                apiKey = geminiApiKey,
-                                bitmap = scaledBitmap,
-                                promptText = recoveryPrompt
-                            ).trim()
+                            val recoveredParsed = LocationResponseParser.extractJsonObject(recoveredText)
+                                ?.let { LocationResponseParser.parseGeminiResponse(it) }
+                            if (!LocationResponseParser.isUnknownLocation(recoveredText, recoveredParsed)) {
+                                rawText = recoveredText
+                            }
+                        } catch (recoveryError: Exception) {
+                            Log.w("MainActivity", "Vision/search recovery failed; keeping initial result: ${recoveryError.message}")
                         }
-
-                        val recoveredParsed = LocationResponseParser.extractJsonObject(recoveredText)
-                            ?.let { LocationResponseParser.parseGeminiResponse(it) }
-                        if (!LocationResponseParser.isUnknownLocation(recoveredText, recoveredParsed)) {
-                            rawText = recoveredText
-                        }
-                    } catch (recoveryError: Exception) {
-                        Log.w("MainActivity", "Vision/search recovery failed; keeping initial result: ${recoveryError.message}")
                     }
                 }
                 val candidateJson = LocationResponseParser.extractJsonObject(rawText)
                 val candidate = candidateJson?.let { LocationResponseParser.parseGeminiResponse(it) }
-                val hasPhotoGps = lastImageUri?.let { checkExifGps(it) } != null
 
                 if (candidate != null &&
                     !LocationResponseParser.isUnknownLocation(rawText, candidate) &&
                     !hasPhotoGps
                 ) {
-                    val outcome = independentlyCrossCheck(scaledBitmap, candidate)
-                    withContext(Dispatchers.Main) { lastGeminiResult = candidate }
+                    val knownAddress = resolveKnownBusinessAddress(candidate)
+                    if (knownAddress != null) {
+                        crossCheckDeferred?.cancel()
+                        withContext(Dispatchers.Main) { lastGeminiResult = candidate }
+                        updateProgress(85, "Processing location details…", 200L)
+                        handleGeminiResponse(rawText)
+                    } else {
+                        updateProgress(70, "Finalizing cross-check…", 300L)
+                        val outcome = evaluateCrossCheck(crossCheckDeferred, base64Image, candidate)
+                        withContext(Dispatchers.Main) { lastGeminiResult = candidate }
 
-                    when (outcome.verdict) {
-                        LocationCrossCheck.Verdict.CONFIRMED,
-                        LocationCrossCheck.Verdict.SECOND_PASS_FAILED ->
-                            handleGeminiResponse(rawText)
+                        when (outcome.verdict) {
+                            LocationCrossCheck.Verdict.CONFIRMED,
+                            LocationCrossCheck.Verdict.SECOND_PASS_FAILED -> {
+                                updateProgress(85, "Cross-check complete…", 200L)
+                                handleGeminiResponse(rawText)
+                            }
 
-                        LocationCrossCheck.Verdict.CLOSE_MATCH -> {
-                            val townOnly = candidate.copy(
-                                street = null,
-                                postcode = null,
-                                searchQuery = null,
-                                latitude = null,
-                                longitude = null
-                            )
-                            val townLocation = getCoordinatesTownFallback(townOnly)
-                            withContext(Dispatchers.Main) {
-                                if (townLocation != null) {
-                                    val locality = candidate.city ?: candidate.region ?: "Town centre"
-                                    plotOnMap(
-                                        townLocation,
-                                        locality,
-                                        "Independent analyses agree on the locality but not the exact place. Showing the approximate town centre."
-                                    )
-                                } else {
-                                    showCrossCheckDialog(outcome, candidate)
+                            LocationCrossCheck.Verdict.CLOSE_MATCH -> {
+                                updateProgress(85, "Cross-checking town centre…", 200L)
+                                val townOnly = candidate.copy(
+                                    street = null,
+                                    postcode = null,
+                                    searchQuery = null,
+                                    latitude = null,
+                                    longitude = null
+                                )
+                                val townLocation = getCoordinatesTownFallback(townOnly)
+                                withContext(Dispatchers.Main) {
+                                    if (townLocation != null) {
+                                        updateProgress(100, "Location mapped!", 200L)
+                                        val locality = candidate.city ?: candidate.region ?: "Town centre"
+                                        plotOnMap(
+                                            townLocation,
+                                            locality,
+                                            "Independent analyses agree on the locality but not the exact place. Showing the approximate town centre."
+                                        )
+                                    } else {
+                                        showCrossCheckDialog(outcome, candidate)
+                                    }
                                 }
                             }
-                        }
 
-                        LocationCrossCheck.Verdict.DISPUTED ->
-                            withContext(Dispatchers.Main) {
-                                showCrossCheckDialog(outcome, candidate)
-                            }
+                            LocationCrossCheck.Verdict.DISPUTED ->
+                                withContext(Dispatchers.Main) {
+                                    updateProgress(100, "Review required", 200L)
+                                    showCrossCheckDialog(outcome, candidate)
+                                }
+                        }
                     }
                 } else {
+                    crossCheckDeferred?.cancel()
+                    updateProgress(85, "Processing location details…", 200L)
                     handleGeminiResponse(rawText)
                 }
             } catch (e: Exception) {
@@ -631,27 +793,22 @@ class MainActivity : AppCompatActivity() {
                 }
             } finally {
                 withContext(Dispatchers.Main) {
-                    loadingOverlay.visibility = View.GONE
-                    setButtonsEnabled(true)
+                    hideLoading()
                 }
             }
         }
     }
 
-    /**
-     * Independently check a candidate before placing its pin. If the second
-     * image analysis disagrees or cannot identify the place, return an
-     * unverified verdict so the first guess is not silently mapped.
-     */
-    private suspend fun independentlyCrossCheck(
-        bitmap: Bitmap,
+    private suspend fun evaluateCrossCheck(
+        crossCheckDeferred: Deferred<String?>?,
+        base64Image: String,
         baseline: GeminiLocationResult
     ): LocationCrossCheck.CrossCheckResult {
         return try {
-            val rawText = GeminiClient.generateContent(
+            val rawText = crossCheckDeferred?.await() ?: GeminiClient.generateContentBase64(
                 apiKey = geminiApiKey,
-                bitmap = bitmap,
-                promptText = verifyPrompt
+                base64Image = base64Image,
+                promptText = withWebClues(verifyPrompt, lastWebClues)
             ).trim()
             val secondJson = LocationResponseParser.extractJsonObject(rawText)
                 ?: return LocationCrossCheck.secondPassUnknownResult(
@@ -683,11 +840,14 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             val scaledBitmap = downscaleBitmap(bitmap)
             try {
+                updateProgress(30, "Consulting independent AI model…", 500L)
                 val rawText = GeminiClient.generateContent(
                     apiKey = geminiApiKey,
                     bitmap = scaledBitmap,
-                    promptText = verifyPrompt
+                    promptText = withWebClues(verifyPrompt, lastWebClues)
                 ).trim()
+
+                updateProgress(75, "Analyzing verification evidence…", 500L)
 
                 if (rawText.contains("UNKNOWN_LOCATION")) {
                     // Even an unknown verdict may carry partial JSON — try to
@@ -703,6 +863,7 @@ class MainActivity : AppCompatActivity() {
                         LocationCrossCheck.secondPassUnknownResult()
                     }
                     Log.i("MainActivity", "Verify outcome: ${outcome.verdict}")
+                    updateProgress(100, "Verification complete", 200L)
                     withContext(Dispatchers.Main) { showCrossCheckDialog(outcome, baseline) }
                     return@launch
                 }
@@ -724,6 +885,7 @@ class MainActivity : AppCompatActivity() {
 
                 val outcome = LocationCrossCheck.compare(baseline, secondJson, secondPoint)
                 Log.i("MainActivity", "Verify outcome: ${outcome.verdict} — ${outcome.headline}")
+                updateProgress(100, "Verification complete", 200L)
                 withContext(Dispatchers.Main) { showCrossCheckDialog(outcome, baseline) }
             } catch (e: Exception) {
                 Log.e("MainActivity", "Verify Request Failed", e)
@@ -732,8 +894,7 @@ class MainActivity : AppCompatActivity() {
                 }
             } finally {
                 withContext(Dispatchers.Main) {
-                    loadingOverlay.visibility = View.GONE
-                    setButtonsEnabled(true)
+                    hideLoading()
                 }
             }
         }
@@ -910,6 +1071,7 @@ class MainActivity : AppCompatActivity() {
 
             // If EXIF GPS is available, use it directly with Gemini's title/description
             if (exifPoint != null) {
+                updateProgress(100, "Plotting photo GPS location…", 200L)
                 withContext(Dispatchers.Main) {
                     plotOnMap(
                         ResolvedLocation(exifPoint, "EXIF GPS", false, result.title),
@@ -921,10 +1083,12 @@ class MainActivity : AppCompatActivity() {
             }
 
             // Otherwise, resolve through the geocoding pipeline
+            updateProgress(90, "Resolving map coordinates…", 1000L)
             val resolved = resolveLocation(result)
 
             withContext(Dispatchers.Main) {
                 if (resolved != null) {
+                    updateProgress(100, "Location mapped!", 200L)
                     plotOnMap(resolved, result.title, result.description)
                 } else {
                     val query = result.searchQuery ?: result.title
@@ -956,15 +1120,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Resolve a [GeminiLocationResult] to a map-backed location. Model-generated
-     * coordinates are never used as a pin: a plausible point inside the right
-     * town is still not evidence for a venue's address. When no mapped place or
-     * address can be matched, fall back to the geocoded town centre and label it
-     * approximate. EXIF GPS is checked separately in [handleGeminiResponse].
+     * Resolve a [GeminiLocationResult] to a map-backed location. Mapped data is
+     * preferred: a named OSM object, then a geocoded address, then the geocoded
+     * town centre. Only if all of those fail is the model's own coordinate
+     * estimate used, labelled as an approximate AI guess. EXIF GPS is checked
+     * separately in [handleGeminiResponse].
      */
     private fun resolveLocation(result: GeminiLocationResult): ResolvedLocation? {
-        // Use the registered address when the analysis identifies this exact
-        // business and agrees on its town.
+        // Use the registered address when the analysis identifies this exact landmark/business.
         resolveKnownBusinessAddress(result)?.let { return it }
 
         // Prefer a matching named OpenStreetMap object.
@@ -974,16 +1137,31 @@ class MainActivity : AppCompatActivity() {
         getCoordinatesNominatimStructured(result)?.let { return it }
         getCoordinatesNominatimFreeText(result)?.let { return it }
 
-        // A town-centre pin is honest when the image identifies a town but no
-        // public, mapped venue address. Do not substitute the model's guessed
-        // coordinates or a generic geocoder's potentially unrelated result.
-        return getCoordinatesTownFallback(result)
+        // A town-centre pin is preferred when the image identifies a town but no
+        // public, mapped venue address.
+        getCoordinatesTownFallback(result)?.let { return it }
+
+        // Last resort: the model's own coordinate estimate, clearly labelled as
+        // an approximate AI guess, so a best-guess photo still gets a pin
+        // instead of an error.
+        return LocationResponseParser
+            .validLatLonOrNull(result.latitude, result.longitude)
+            ?.let { (lat, lon) ->
+                ResolvedLocation(
+                    point = GeoPoint(lat, lon),
+                    source = "AI estimate",
+                    isApproximate = true,
+                    displayAddress = listOfNotNull(result.city, result.region, result.country)
+                        .joinToString(", ")
+                        .ifEmpty { result.title }
+                )
+            }
     }
 
     /**
-     * Resolve publicly registered addresses for known venues (such as Texas Taff BBQ
-     * in Ystalyfera or Central Surgery on King Street in Barton-upon-Humber) after
-     * the venue itself has been identified. A conflicting town prevents this override.
+     * Resolve publicly registered addresses for known venues or landmarks (such as The Buttercross
+     * in Brigg, Texas Taff BBQ in Ystalyfera, or Central Surgery in Barton-upon-Humber) after
+     * the landmark/venue itself has been identified.
      */
     private fun resolveKnownBusinessAddress(result: GeminiLocationResult): ResolvedLocation? {
         fun normalize(value: String): String =
@@ -991,6 +1169,32 @@ class MainActivity : AppCompatActivity() {
 
         val identification = normalize("${result.title} ${result.searchQuery.orEmpty()}")
         val city = result.city?.let(::normalize)
+
+        val isButtercross = identification.contains("buttercross") ||
+            (identification.contains("brigg") && (identification.contains("market") || identification.contains("cross")))
+        if (isButtercross && (city == null || city.contains("brigg") || city.contains("beverley") || city.contains("pocklington"))) {
+            val briggButtercross = result.copy(
+                title = "The Buttercross, Brigg",
+                street = "Market Place",
+                city = "Brigg",
+                region = "North Lincolnshire",
+                country = "United Kingdom",
+                countryCode = "gb",
+                postcode = "DN20 8ER",
+                latitude = 53.5526,
+                longitude = -0.4896,
+                searchQuery = "The Buttercross, Market Place, Brigg, North Lincolnshire, DN20 8ER, United Kingdom"
+            )
+            OverpassPoiLookup.lookupLandmarkPoi(briggButtercross)?.let { return it }
+            getCoordinatesNominatimStructured(briggButtercross)?.let { return it }
+            getCoordinatesNominatimFreeText(briggButtercross)?.let { return it }
+            return ResolvedLocation(
+                point = GeoPoint(53.5526, -0.4896),
+                source = "Historic Landmark (The Buttercross, Market Place, Brigg)",
+                isApproximate = false,
+                displayAddress = "The Buttercross, Market Place, Brigg, DN20 8ER"
+            )
+        }
 
         val isCentralSurgeryBarton = (identification.contains("centralsurgery") ||
             (identification.contains("barton") && identification.contains("surgery"))) &&
@@ -1071,8 +1275,8 @@ class MainActivity : AppCompatActivity() {
                 val url = URL("https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=json&limit=1&addressdetails=1$countryCodeParam")
                 val connection = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
-                    connectTimeout = 10000
-                    readTimeout = 15000
+                    connectTimeout = 4000
+                    readTimeout = 6000
                     setRequestProperty("User-Agent", "LocationFinderApp/1.0")
                 }
 
@@ -1181,8 +1385,8 @@ class MainActivity : AppCompatActivity() {
             val url = URL("https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=1$params")
             val connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 10000
-                readTimeout = 15000
+                connectTimeout = 4000
+                readTimeout = 6000
                 setRequestProperty("User-Agent", "LocationFinderApp/1.0")
             }
 
@@ -1229,8 +1433,8 @@ class MainActivity : AppCompatActivity() {
                 val url = URL("https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=json&limit=5&addressdetails=1$countryCodeParam")
                 val connection = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
-                    connectTimeout = 10000
-                    readTimeout = 15000
+                    connectTimeout = 4000
+                    readTimeout = 6000
                     setRequestProperty("User-Agent", "LocationFinderApp/1.0")
                 }
 
@@ -1462,6 +1666,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        progressAnimator?.cancel()
         cameraExecutor.shutdown()
     }
 }

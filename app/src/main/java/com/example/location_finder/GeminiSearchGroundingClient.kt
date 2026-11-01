@@ -30,9 +30,20 @@ object GeminiSearchGroundingClient {
         promptText: String
     ): String {
         val outputStream = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
         val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+        return generateContentWithSearchBase64(apiKey, base64Image, promptText)
+    }
 
+    /**
+     * Grounded search content generation using pre-encoded [base64Image]
+     * to eliminate duplicate bitmap compression overhead.
+     */
+    suspend fun generateContentWithSearchBase64(
+        apiKey: String,
+        base64Image: String,
+        promptText: String
+    ): String {
         val payload = JSONObject().apply {
             put("contents", JSONArray().apply {
                 put(JSONObject().apply {
@@ -131,8 +142,8 @@ object GeminiSearchGroundingClient {
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
-            connectTimeout = 15000
-            readTimeout = 35000
+            connectTimeout = 8000
+            readTimeout = 20000
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
         }
 
