@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Location Finder</string>
-    <string name="select_photo_from_gallery">Select Photo from Gallery</string>
-    <string name="open_in_google_maps">Open in Google Maps</string>
-    <string name="brand_title">IMAGE LOCATOR</string>
-    <string name="home_headline">Where was this photo taken?</string>
-    <string name="home_subtitle">Choose an image and we’ll find its location.</string>
-    <string name="choose_photo">Gallery</string>
-    <string name="take_photo">Take photo</string>
-    <string name="camera">Camera</string>
-    <string name="verify_previous_result">Verify previous result</string>
-    <string name="finding_location">Finding your location…</string>
-    <string name="close_camera">Close camera</string>
+    <string name="app_name">Cyber Locator</string>
+    <string name="select_photo_from_gallery">Select Photo Matrix</string>
+    <string name="open_in_google_maps">[ ACCESS MAP MATRIX ]</string>
+    <string name="brand_title">CYBER_LOCATOR</string>
+    <string name="home_headline">TARGET RECONNAISSANCE</string>
+    <string name="home_subtitle">Feed visual data matrix to resolve target location.</string>
+    <string name="choose_photo">[ UPLOAD DATA ]</string>
+    <string name="take_photo">Capture Feed</string>
+    <string name="camera">[ CAM CAPTURE ]</string>
+    <string name="verify_previous_result">> VERIFY PREVIOUS RESULT</string>
+    <string name="finding_location">DECRYPTING GEOLOCATION...</string>
+    <string name="close_camera">ABORT CAMERA</string>
 </resources>

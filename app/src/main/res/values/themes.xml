@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Locationfinder" parent="Theme.Material3.Light.NoActionBar">
-        <item name="colorPrimary">@color/forest_700</item>
-        <item name="colorOnPrimary">@color/white</item>
-        <item name="colorPrimaryContainer">@color/mint_100</item>
-        <item name="colorOnPrimaryContainer">@color/ink_900</item>
-        <item name="colorSecondary">@color/forest_800</item>
-        <item name="colorSurface">@color/paper_50</item>
-        <item name="colorOnSurface">@color/ink_900</item>
-        <item name="colorOutline">@color/outline_300</item>
-        <item name="android:colorAccent">@color/forest_700</item>
-        <item name="android:statusBarColor">@color/paper_50</item>
-        <item name="android:navigationBarColor">@color/paper_50</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar">true</item>
+    <style name="Theme.Locationfinder" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/cyber_green</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <item name="colorPrimaryContainer">@color/cyber_green_dark</item>
+        <item name="colorOnPrimaryContainer">@color/cyber_green</item>
+        <item name="colorSecondary">@color/cyber_cyan</item>
+        <item name="colorSurface">@color/cyber_surface</item>
+        <item name="colorOnSurface">@color/cyber_text</item>
+        <item name="colorOutline">@color/cyber_green</item>
+        <item name="android:colorAccent">@color/cyber_green</item>
+        <item name="android:statusBarColor">@color/cyber_void</item>
+        <item name="android:navigationBarColor">@color/cyber_void</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
     </style>
 </resources>
