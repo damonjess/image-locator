@@ -266,4 +266,35 @@ class LocationCrossCheckTest {
         )
         assertEquals(LocationCrossCheck.Verdict.CONFIRMED, outcome.verdict)
     }
+
+    @Test
+    fun wiganStandishgate_storefrontAndStreetTitleVariant_isConfirmed() {
+        val first = GeminiLocationResult(
+            title = "Standishgate, Wigan",
+            description = "Pedestrianised shopping street outside Glamour Point and Rebuild with Hope",
+            confidence = "high",
+            latitude = 53.54745,
+            longitude = -2.63055,
+            street = "Standishgate",
+            city = "Wigan",
+            region = "Greater Manchester",
+            country = "United Kingdom",
+            countryCode = "gb",
+            postcode = "WN1 1UE",
+            searchQuery = "25 Standishgate, Wigan, WN1 1UE, United Kingdom"
+        )
+        val second = org.json.JSONObject(
+            """
+            {"title": "Standishgate, Wigan", "city": "Wigan",
+             "region": "Greater Manchester", "country": "United Kingdom", "confidence": "high",
+             "latitude": 53.5474, "longitude": -2.6306}
+            """.trimIndent()
+        )
+        val outcome = LocationCrossCheck.compare(
+            first,
+            second,
+            secondPoint = org.osmdroid.util.GeoPoint(53.5474, -2.6306)
+        )
+        assertEquals(LocationCrossCheck.Verdict.CONFIRMED, outcome.verdict)
+    }
 }

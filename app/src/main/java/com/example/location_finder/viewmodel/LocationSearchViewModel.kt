@@ -204,14 +204,6 @@ class LocationSearchViewModel(
                 return
             }
 
-            val knownAddress = repository.resolveKnownBusinessAddress(candidate)
-            if (knownAddress != null) {
-                outcome.crossCheckDeferred?.cancel()
-                updateProgress(85, "Processing location details…")
-                plotOnMap(knownAddress, candidate.title, candidate.description)
-                return
-            }
-
             updateProgress(70, "Finalizing cross-check…")
             val crossCheckOutcome = repository.evaluateCrossCheck(
                 outcome.crossCheckDeferred,

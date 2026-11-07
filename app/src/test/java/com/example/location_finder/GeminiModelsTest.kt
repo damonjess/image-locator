@@ -13,11 +13,11 @@ class GeminiModelsTest {
     @Test
     fun unavailableModels_allConfiguredAvailable_returnsEmpty() {
         val available = setOf(
-            "models/gemini-3.5-flash-lite",
-            "models/gemini-flash-lite-latest",
             "models/gemini-3-flash-preview",
             "models/gemini-3.6-flash",
             "models/gemini-3.5-flash",
+            "models/gemini-3.5-flash-lite",
+            "models/gemini-flash-lite-latest",
             "models/gemini-3.1-flash-lite"
         )
         val missing = GeminiModels.unavailableModels(GeminiModels.FALLBACK_CHAIN, available)

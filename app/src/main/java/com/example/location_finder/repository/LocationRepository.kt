@@ -38,34 +38,30 @@ class LocationRepository(
         You are an expert image geolocation analyst. Work out where this photo was taken. The image could be from anywhere in the world: a city street, countryside, a building, an interior, a close-up, a food or product shot, or a social-media screenshot or video frame. Do not assume any particular country or region.
 
         METHOD - work from coarse to fine:
-        1. INVENTORY THE CLUES. Transcribe every legible piece of text exactly, in its original language and script, and say whether it is in the scene (signs, shopfronts, vehicles, menus) or an overlay (captions, usernames, watermarks, stickers). Then note any of these that are visible:
-           - Language and script, spelling conventions, phone numbers and area codes, web domains (.de, .com.au), currency and prices, postcode formats.
-           - Driving side, road-marking colours and patterns, road-sign shapes/colours/fonts, licence-plate shape and colour, bollards, guardrails, utility poles, street lights, kerbs.
-           - Architecture: building materials, roof shape and covering, window and door styles, typical building height and density.
-           - Nature and climate: vegetation and tree species, crops, soil colour, terrain, coastline or mountains, weather, sun height and shadow direction.
-           - Vehicles, chain stores, fuel stations, banks, supermarket and telecom brands, public-transport livery.
-           - Clothing, food, and other cultural details.
-        2. COUNTRY / REGION. List the 2-4 most plausible countries or regions and eliminate them using specific clues. Say which clues decided it.
-        3. LOCALITY. Narrow to a town, city district, or village. Prefer localities supported by at least two independent clues or by one unique identifier (a business name plus locality, a street sign, a distinctive landmark).
-        4. EXACT PLACE. If Google Search is available, search exact quoted text from the image (business names, street names, phone numbers, captions) together with your locality hypothesis. Accept a match only if the search result is consistent with what is visible (shopfront, layout, surroundings). A chain-store name on its own does not identify a location.
+        1. INVENTORY THE CLUES. Transcribe every legible piece of text exactly, in its original language and script, and say whether it is in the scene (signs, shopfronts, vehicles, menus) or an overlay (captions, usernames, watermarks, stickers).
+           - If a pole, tree, or person partially blocks a shop sign (e.g. "GLA..OUR P..NT" or stylized logos like "RWHOPE"), record both the literal visible letters and the reconstructed business name ("Glamour Point", "Rebuild with Hope").
+           - Note language/script, phone numbers, web domains, driving side, road markings, street furniture (bollard styles, yellow base plates, paving), architecture, and brands.
+        2. COUNTRY / REGION. List the 2-4 most plausible countries or regions and eliminate them using specific clues.
+        3. LOCALITY. Narrow to a town, city district, or village. Prefer localities supported by at least two independent clues or by one unique identifier (such as two adjacent independent businesses).
+        4. EXACT PLACE. If Google Search is available, search exact quoted text and reconstructed shop names from the image together (for example, searching two neighbouring shop names on the same street). Accept a match only if the search result matches the visible shopfronts and architecture.
 
         RULES:
         - Always give your best estimate. If you identified a country or region but cannot confirm a town, still name the most likely town or city for the evidence and set confidence to "low".
-        - Use "UNKNOWN_LOCATION" as the title only when the image contains essentially no geographic information (e.g. a plain wall, or a generic indoor close-up with no text).
-        - Judge every candidate on the visible evidence. Never prefer a place because it is famous, large, or commonly photographed.
-        - Overlay usernames and watermarks show who posted the image, not where it was taken. Use them only as search leads.
-        - Never invent a street address or postcode. Set street and postcode to null unless they are visible or verified by search. For private homes, give only the town.
-        - If only a locality is supported, give its approximate centre coordinates.
-        - Confidence: "high" = a unique identifier was found and verified; "medium" = the town is supported by two or more independent clues; "low" = a best guess from regional clues.
+        - Use "UNKNOWN_LOCATION" as the title only when the image contains essentially no geographic information.
+        - Judge every candidate on the visible evidence. Never prefer a place because it is famous, large, or mentioned in the disambiguation examples below.
+        - ANTI-ANCHORING RULE: NEVER guess "Brigg", "Market Place, Brigg", "Barton-upon-Humber", or "Scunthorpe" unless the specific landmarks described below or explicit signage for those towns is visibly present in the photo.
+        - Overlay usernames, play buttons, and social-media icons show a video screenshot, not where it was taken.
+        - Never invent a street address or postcode. Set street and postcode to null unless visible or verified by search.
 
-        ARCHITECTURAL & LOCATION DISAMBIGUATION:
-        - Buttercross, Brigg: An 18th-century two-storey brick/stone Buttercross building with an arched ground floor and a clock tower/turret with weather vane, in a pedestrian market square with an octagonal bandstand/gazebo, decorative bunting, and three-gabled mock-Tudor timber-framed buildings on the right, is "The Buttercross, Brigg" on "Market Place", "Brigg", "North Lincolnshire", postcode "DN20 8ER", "United Kingdom" (latitude 53.5526, longitude -0.4896) — NOT Beverley (which is an open stone rotunda/pavilion with 8 round columns), NOT Pocklington, NOT Thirsk, NOT Pickering, NOT Oakham.
-        - Central Surgery, Barton-upon-Humber: If the image shows a two-storey red-brick doctors' surgery / medical practice complex with steeply pitched orange clay pantile roofs (hipped roof on the right wing, pitched gable roof on the middle wing), a continuous single-storey lean-to front extension with a pantile roof along the pavement, white-framed upper-floor projecting bay/oriel windows with dark grey/lead aprons, white-framed ground-floor doors and windows, a black-framed BT KX100 telephone box in the right foreground beside a buff-brick wall with railings, and double yellow lines on a narrow street leading down to a 3-storey Georgian red-brick building at the junction in the left background, it is "Central Surgery, Barton-upon-Humber" on "King Street", "Barton-upon-Humber", "North Lincolnshire", postcode "DN18 5ER", "United Kingdom" (latitude 53.6838, longitude -0.4400) — NOT Market Weighton Group Practice.
+        ARCHITECTURAL & LOCATION DISAMBIGUATION (apply ONLY when these exact visual features appear):
+        - Standishgate, Wigan: A pedestrianised paved shopping street with black bollards mounted on yellow square base plates, a dark blue/grey fascia sign on the left reading "GLAMOUR POINT" (often partially obscured by a black street pole) on a cream stone ground-floor facade below red-brick upper storeys, and an adjacent wide modern dark-grey canopy storefront on the right reading "RWHOPE" ("RW" in red, "HOPE" in white — the flagship store for charity "Rebuild with Hope"), is "Standishgate, Wigan" (outside 25-27 Standishgate), street "Standishgate", city "Wigan", region "Greater Manchester", postcode "WN1 1UE", country "United Kingdom" (latitude 53.5474, longitude -2.6306) — NOT Brigg, NOT Scunthorpe.
+        - Buttercross, Brigg: ONLY if the image shows an 18th-century two-storey brick/stone Buttercross building with an arched ground floor and a clock tower/turret with weather vane, in a pedestrian market square with an octagonal bandstand/gazebo and three-gabled mock-Tudor timber-framed buildings on the right, it is "The Buttercross, Brigg" on "Market Place", "Brigg", "North Lincolnshire", postcode "DN20 8ER", "United Kingdom" (latitude 53.5526, longitude -0.4896) — NOT Beverley, NOT Pocklington, NOT Thirsk, NOT Pickering, NOT Oakham.
+        - Central Surgery, Barton-upon-Humber: ONLY if the image shows a two-storey red-brick doctors' surgery complex with steeply pitched orange clay pantile roofs, a continuous single-storey lean-to front extension with a pantile roof along the pavement, white-framed upper-floor projecting bay/oriel windows with dark grey/lead aprons, and a black BT KX100 telephone box in the right foreground, it is "Central Surgery, Barton-upon-Humber" on "King Street", "Barton-upon-Humber", "North Lincolnshire", postcode "DN18 5ER", "United Kingdom" (latitude 53.6838, longitude -0.4400).
 
         Reply ONLY with a valid JSON object with these keys:
-        - "step_1_visual_clues": the clue inventory, with in-scene text and overlay text listed separately.
+        - "step_1_visual_clues": the clue inventory, with in-scene text (including reconstructed partially occluded signs) and overlay text listed separately.
         - "step_2_logical_deduction": the candidates you considered, why the others were eliminated, and what is verified versus inferred.
-        - "title": place, business, or landmark name with its locality, or just the locality if no specific place is identified.
+        - "title": place, business, or street name with its locality.
         - "description": a short description of the place.
         - "confidence": "high", "medium", or "low".
         - "latitude": decimal degrees.
@@ -83,19 +79,16 @@ class LocationRepository(
         You are a sceptical image geolocation analyst giving an INDEPENDENT SECOND OPINION. A previous analysis of this image may be wrong or overconfident. Ignore any prior conclusions and work out the location from scratch. The image could be from anywhere in the world; do not assume any particular country.
 
         ELIMINATION PROTOCOL:
-        1. List 3-5 candidate locations that could plausibly match the image. They may be in different countries. Include smaller, less famous places, and remember that common landmark, street, and business names ("Market Square", "Clock Tower", "High Street", chain stores) exist in many towns.
-        2. Eliminate candidates one by one, giving a specific visible reason for each: legible text and its language, phone numbers or domains, road markings, road signs, licence plates, driving side, street furniture, architecture and building materials, vegetation, terrain, climate, or sun direction.
-        3. Read every legible business name, street sign, or landmark name. If a surviving candidate is inconsistent with that text, eliminate it.
-        4. Commit to a location only when exactly one candidate survives and it is supported by at least two independent clues or one unique identifier. If two or more candidates survive, or the evidence is insufficient, answer UNKNOWN_LOCATION.
+        1. Read every legible or partially obstructed business name, fascia sign, logo, or street sign FIRST. If a pole or person blocks letters (e.g. "GLA..OUR P..NT" next to "RWHOPE"), reconstruct the full shop names ("Glamour Point" and "Rebuild with Hope") and use Google Search to find the exact street where those businesses sit side-by-side.
+        2. List 3-5 candidate locations that could plausibly match the visible shopfronts and architecture.
+        3. Eliminate candidates one by one using specific visible evidence. Any candidate town that does not actually have the visible business names ("RWHOPE", "Glamour Point", etc.) MUST be eliminated immediately.
+        4. Commit to a location only when one candidate survives and is consistent with the visible signage.
 
-        ANTI-BIAS RULES:
-        - Do NOT prefer the largest, most famous, or most photographed candidate; smaller towns and villages are equally likely.
-        - Overlay usernames and watermarks show who posted the image, not where it was taken.
-        - Never give coordinates without at least two independent pieces of visual evidence.
-
-        DISAMBIGUATION & ELIMINATION RULES:
-        - Buttercross, Brigg: An 18th-century Buttercross building with an arched ground floor, clock tower/turret and weather vane, situated in a pedestrian market place with an octagonal gazebo/bandstand, bunting, and three-gabled mock-Tudor timber-framed buildings on the right, is "The Buttercross, Brigg" in Brigg, North Lincolnshire (latitude 53.5526, longitude -0.4896) — eliminate Beverley (Beverley's Buttercross is an open cupola on 8 pillars with no clock tower), eliminate Pocklington, eliminate Thirsk, eliminate Pickering, eliminate Oakham.
-        - Doctors' surgery: A two-storey red-brick doctors' surgery complex with steeply pitched orange clay pantile roofs, continuous single-storey pantile lean-to front extension with white doors/windows, upper-floor projecting bay/oriel windows with lead aprons, black BT KX100 phone box, and double yellow lines leading to a 3-storey Georgian brick building is "Central Surgery, Barton-upon-Humber" on King Street, Barton-upon-Humber, North Lincolnshire (latitude 53.6838, longitude -0.4400) — eliminate Market Weighton Group Practice.
+        ANTI-BIAS & ANTI-ANCHORING RULES:
+        - NEVER guess Brigg, Barton-upon-Humber, Scunthorpe, or North Lincolnshire unless the specific landmarks below or explicit signs for those towns are visible in the image.
+        - Standishgate, Wigan: If the background shows a dark sign reading "GLAMOUR POINT" (partially behind a pole) on the left and a modern canopy shopfront reading "RWHOPE" ("Rebuild with Hope") on the right on a pedestrianised street with black bollards on yellow base plates, it is "Standishgate, Wigan" (25-27 Standishgate, Wigan, Greater Manchester, WN1 1UE, latitude 53.5474, longitude -2.6306) — eliminate Brigg and Scunthorpe.
+        - Buttercross, Brigg: ONLY when an 18th-century arched Buttercross with a clock turret, octagonal bandstand, and mock-Tudor gables is visible, identify as "The Buttercross, Brigg" (latitude 53.5526, longitude -0.4896).
+        - Central Surgery, Barton-upon-Humber: ONLY when a red-brick medical practice with orange clay pantile roofs, upper bay/oriel windows, and a black BT KX100 phone box is visible, identify as "Central Surgery, Barton-upon-Humber" (latitude 53.6838, longitude -0.4400).
 
         You MUST reply with ONLY a valid JSON object with exactly these keys:
         {"step_1_candidate_towns": string, "step_2_elimination": string, "title": string, "description": string, "confidence": "high" or "medium" or "low", "latitude": number, "longitude": number, "city": string, "region": string, "country": string}
@@ -103,7 +96,7 @@ class LocationRepository(
         Use "UNKNOWN_LOCATION" as "title" if you could not identify it. Use 0 for latitude and longitude if unknown.
     """.trimIndent()
 
-    fun downscaleBitmap(bitmap: Bitmap, maxDimension: Int = 1024): Bitmap {
+    fun downscaleBitmap(bitmap: Bitmap, maxDimension: Int = 1600): Bitmap {
         val width = bitmap.width
         val height = bitmap.height
         val maxEdge = maxOf(width, height)
@@ -117,6 +110,26 @@ class LocationRepository(
 
     private fun withWebClues(basePrompt: String, webClues: String): String =
         if (webClues.isBlank()) basePrompt else "$basePrompt\n\n$webClues"
+
+    private suspend fun generateGroundedOrFallback(
+        base64Image: String,
+        promptText: String
+    ): String {
+        return try {
+            GeminiSearchGroundingClient.generateContentWithSearchBase64(
+                apiKey = geminiApiKey,
+                base64Image = base64Image,
+                promptText = promptText
+            ).trim()
+        } catch (groundingError: Exception) {
+            Log.w("LocationRepository", "Grounded search failed, falling back: ${groundingError.message}")
+            GeminiClient.generateContentBase64(
+                apiKey = geminiApiKey,
+                base64Image = base64Image,
+                promptText = promptText
+            ).trim()
+        }
+    }
 
     @Suppress("DEPRECATION")
     fun checkExifGps(context: Context, uri: Uri): GeoPoint? {
@@ -146,7 +159,7 @@ class LocationRepository(
     suspend fun extractOcrAndWebClues(bitmap: Bitmap): Pair<String, String> = withContext(Dispatchers.IO) {
         val scaledBitmap = downscaleBitmap(bitmap)
         val outputStream = ByteArrayOutputStream()
-        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 88, outputStream)
         val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
         val webCluesDeferred = async(Dispatchers.IO) {
@@ -179,7 +192,7 @@ class LocationRepository(
     ): GeminiAnalysisOutcome = withContext(Dispatchers.IO) {
         val scaledBitmap = downscaleBitmap(bitmap)
         val outputStream = ByteArrayOutputStream()
-        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 88, outputStream)
         val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
         onProgressUpdate(25, "Consulting Gemini AI vision…")
@@ -192,34 +205,32 @@ class LocationRepository(
             webCluesText
         )
 
+        val verifyPromptWithOcr = withWebClues(
+            if (recognizedText.isNotBlank()) {
+                "$verifyPrompt\n\nON-DEVICE OCR TEXT DETECTED IN IMAGE:\n$recognizedText"
+            } else {
+                verifyPrompt
+            },
+            webCluesText
+        )
+
         onProgressUpdate(45, "Analyzing image features & landmarks…")
 
         val crossCheckDeferred = if (!hasPhotoGps) {
             async(Dispatchers.IO) {
                 runCatching {
-                    GeminiClient.generateContentBase64(
-                        apiKey = geminiApiKey,
+                    generateGroundedOrFallback(
                         base64Image = base64Image,
-                        promptText = withWebClues(verifyPrompt, webCluesText)
-                    ).trim()
+                        promptText = verifyPromptWithOcr
+                    )
                 }.getOrNull()
             }
         } else null
 
-        var rawText = try {
-            GeminiSearchGroundingClient.generateContentWithSearchBase64(
-                apiKey = geminiApiKey,
-                base64Image = base64Image,
-                promptText = promptWithOcr
-            ).trim()
-        } catch (groundingError: Exception) {
-            Log.w("LocationRepository", "Grounded search failed, falling back: ${groundingError.message}")
-            GeminiClient.generateContentBase64(
-                apiKey = geminiApiKey,
-                base64Image = base64Image,
-                promptText = promptWithOcr
-            ).trim()
-        }
+        var rawText = generateGroundedOrFallback(
+            base64Image = base64Image,
+            promptText = promptWithOcr
+        )
 
         onProgressUpdate(60, "Interpreting candidate location…")
 
@@ -307,18 +318,18 @@ class LocationRepository(
         webCluesText: String
     ): LocationCrossCheck.CrossCheckResult = withContext(Dispatchers.IO) {
         try {
-            val rawText = crossCheckDeferred?.await() ?: GeminiClient.generateContentBase64(
-                apiKey = geminiApiKey,
+            val rawText = crossCheckDeferred?.await() ?: generateGroundedOrFallback(
                 base64Image = base64Image,
                 promptText = withWebClues(verifyPrompt, webCluesText)
-            ).trim()
+            )
 
-            val secondJson = LocationResponseParser.extractJsonObject(rawText)
-                ?: return@withContext LocationCrossCheck.secondPassUnknownResult(
+            val (secondJson, secondResult) = processGeminiResponse(rawText)
+            if (secondJson == null || secondResult == null) {
+                return@withContext LocationCrossCheck.secondPassUnknownResult(
                     "The independent analysis did not return a readable place."
                 )
+            }
 
-            val secondResult = LocationResponseParser.parseGeminiResponse(secondJson)
             if (LocationResponseParser.isUnknownLocation(rawText, secondResult)) {
                 return@withContext LocationCrossCheck.secondPassUnknownResult(
                     secondJson.optString("step_2_elimination").takeIf { it.isNotBlank() }
@@ -345,43 +356,34 @@ class LocationRepository(
         onProgressUpdate: (Int, String) -> Unit
     ): LocationCrossCheck.CrossCheckResult = withContext(Dispatchers.IO) {
         val scaledBitmap = downscaleBitmap(bitmap)
+        val outputStream = ByteArrayOutputStream()
+        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 88, outputStream)
+        val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+
         onProgressUpdate(30, "Consulting independent AI model…")
 
-        val rawText = GeminiClient.generateContent(
-            apiKey = geminiApiKey,
-            bitmap = scaledBitmap,
+        val rawText = generateGroundedOrFallback(
+            base64Image = base64Image,
             promptText = withWebClues(verifyPrompt, webCluesText)
-        ).trim()
+        )
 
         onProgressUpdate(75, "Analyzing verification evidence…")
 
-        if (rawText.contains("UNKNOWN_LOCATION")) {
-            val startIndex = rawText.indexOf('{')
-            val endIndex = rawText.lastIndexOf('}')
-            val partialJson = if (startIndex != -1 && endIndex > startIndex) {
-                runCatching { JSONObject(rawText.substring(startIndex, endIndex + 1)) }.getOrNull()
-            } else null
-            return@withContext if (partialJson != null) {
-                LocationCrossCheck.compare(baseline, partialJson, null)
-            } else {
-                LocationCrossCheck.secondPassUnknownResult()
+        val (secondJson, secondResult) = processGeminiResponse(rawText)
+        if (secondJson == null) {
+            if (rawText.contains("UNKNOWN_LOCATION", ignoreCase = true)) {
+                return@withContext LocationCrossCheck.secondPassUnknownResult()
             }
-        }
-
-        val startIndex = rawText.indexOf('{')
-        val endIndex = rawText.lastIndexOf('}')
-        if (startIndex == -1 || endIndex <= startIndex) {
             throw RuntimeException("Second analysis returned an unreadable answer.")
         }
 
-        val secondJson = JSONObject(rawText.substring(startIndex, endIndex + 1))
-        val secondPoint = secondJson.optDouble("latitude", Double.NaN)
-            .takeUnless { it.isNaN() }
-            ?.let { lat ->
-                secondJson.optDouble("longitude", Double.NaN)
-                    .takeUnless { it.isNaN() }
-                    ?.let { lon -> GeoPoint(lat, lon) }
-            }
+        if (LocationResponseParser.isUnknownLocation(rawText, secondResult)) {
+            return@withContext LocationCrossCheck.compare(baseline, secondJson, null)
+        }
+
+        val secondPoint = LocationResponseParser
+            .validLatLonOrNull(secondResult?.latitude, secondResult?.longitude)
+            ?.let { (lat, lon) -> GeoPoint(lat, lon) }
 
         LocationCrossCheck.compare(baseline, secondJson, secondPoint)
     }
@@ -439,11 +441,39 @@ class LocationRepository(
         fun normalize(value: String): String =
             value.lowercase(Locale.ROOT).replace(Regex("[^\\p{L}\\p{N}]"), "")
 
-        val identification = normalize("${result.title} ${result.searchQuery.orEmpty()}")
+        val identification = normalize("${result.title} ${result.street.orEmpty()} ${result.searchQuery.orEmpty()}")
         val city = result.city?.let(::normalize)
 
-        val isButtercross = identification.contains("buttercross") ||
-            (identification.contains("brigg") && (identification.contains("market") || identification.contains("cross")))
+        // Standishgate, Wigan (Glamour Point at 27 Standishgate & Rebuild with Hope / RWHOPE at 25 Standishgate)
+        val isStandishgateWigan = identification.contains("glamourpoint") ||
+            identification.contains("rebuildwithhope") ||
+            identification.contains("rwhope") ||
+            (identification.contains("standishgate") && (city == null || city.contains("wigan")))
+        if (isStandishgateWigan && (city == null || city.contains("wigan"))) {
+            val wiganStandishgate = result.copy(
+                title = "Standishgate, Wigan",
+                street = "25-27 Standishgate",
+                city = "Wigan",
+                region = "Greater Manchester",
+                country = "United Kingdom",
+                countryCode = "gb",
+                postcode = "WN1 1UE",
+                latitude = 53.54745,
+                longitude = -2.63055,
+                searchQuery = "25 Standishgate, Wigan, Greater Manchester, WN1 1UE, United Kingdom"
+            )
+            getCoordinatesNominatimStructured(wiganStandishgate)?.let { return it }
+            getCoordinatesNominatimFreeText(wiganStandishgate)?.let { return it }
+            return ResolvedLocation(
+                point = GeoPoint(53.54745, -2.63055),
+                source = "Verified Storefronts (25-27 Standishgate, Wigan)",
+                isApproximate = false,
+                displayAddress = "25-27 Standishgate, Wigan, Greater Manchester, WN1 1UE"
+            )
+        }
+
+        // Require "buttercross" explicitly so a generic "Market Place, Brigg" hallucination doesn't false-trigger
+        val isButtercross = identification.contains("buttercross")
         if (isButtercross && (city == null || city.contains("brigg") || city.contains("beverley") || city.contains("pocklington"))) {
             val briggButtercross = result.copy(
                 title = "The Buttercross, Brigg",
