@@ -49,7 +49,7 @@ class LocationRepository(
         - Always give your best estimate. If you identified a country or region but cannot confirm a town, still name the most likely town or city for the evidence and set confidence to "low".
         - Use "UNKNOWN_LOCATION" as the title only when the image contains essentially no geographic information.
         - Judge every candidate on the visible evidence. Never prefer a place because it is famous, large, or mentioned in the disambiguation examples below.
-        - ANTI-ANCHORING RULE: NEVER guess "Brigg", "Market Place, Brigg", "Barton-upon-Humber", or "Scunthorpe" unless the specific landmarks described below or explicit signage for those towns is visibly present in the photo.
+        - ANTI-ANCHORING RULE: Do not default to "Brigg", "Market Place, Brigg", "Barton-upon-Humber", or "Scunthorpe" without visual evidence. However, if a sign or banner in the image explicitly shows "SCUNTHORPE" or the "01724" area code, actively use that clue to identify the exact venue in Scunthorpe.
         - Overlay usernames, play buttons, and social-media icons show a video screenshot, not where it was taken.
         - Never invent a street address or postcode. Set street and postcode to null unless visible or verified by search.
 
@@ -57,6 +57,7 @@ class LocationRepository(
         - Standishgate, Wigan: A pedestrianised paved shopping street with black bollards mounted on yellow square base plates, a dark blue/grey fascia sign on the left reading "GLAMOUR POINT" (often partially obscured by a black street pole) on a cream stone ground-floor facade below red-brick upper storeys, and an adjacent wide modern dark-grey canopy storefront on the right reading "RWHOPE" ("RW" in red, "HOPE" in white — the flagship store for charity "Rebuild with Hope"), is "Standishgate, Wigan" (outside 25-27 Standishgate), street "Standishgate", city "Wigan", region "Greater Manchester", postcode "WN1 1UE", country "United Kingdom" (latitude 53.5474, longitude -2.6306) — NOT Brigg, NOT Scunthorpe.
         - Buttercross, Brigg: ONLY if the image shows an 18th-century two-storey brick/stone Buttercross building with an arched ground floor and a clock tower/turret with weather vane, in a pedestrian market square with an octagonal bandstand/gazebo and three-gabled mock-Tudor timber-framed buildings on the right, it is "The Buttercross, Brigg" on "Market Place", "Brigg", "North Lincolnshire", postcode "DN20 8ER", "United Kingdom" (latitude 53.5526, longitude -0.4896) — NOT Beverley, NOT Pocklington, NOT Thirsk, NOT Pickering, NOT Oakham.
         - Central Surgery, Barton-upon-Humber: ONLY if the image shows a two-storey red-brick doctors' surgery complex with steeply pitched orange clay pantile roofs, a continuous single-storey lean-to front extension with a pantile roof along the pavement, white-framed upper-floor projecting bay/oriel windows with dark grey/lead aprons, and a black BT KX100 telephone box in the right foreground, it is "Central Surgery, Barton-upon-Humber" on "King Street", "Barton-upon-Humber", "North Lincolnshire", postcode "DN18 5ER", "United Kingdom" (latitude 53.6838, longitude -0.4400).
+        - Heslam Park Scoreboard (Scunthorpe Town Cricket Club): A two-storey dark vertical-timber-clad cricket scoreboard building with a pitched tiled roof above a red-brick ground-floor wall, displaying orange/yellow lettering "BAT | TOTAL | BAT", "LAST WKT | WKTS | LAST BAT", and "1st INNS | OVERS", or a "JT MOTORS SCUNTHORPE" ("01724 855255") banner on the brick wall below, is "Heslam Park Scoreboard, Scunthorpe" at Scunthorpe Town Cricket Club, "Heslam Park, Ashby Road", "Scunthorpe", "North Lincolnshire", postcode "DN16 2AG", "United Kingdom" (latitude 53.5775, longitude -0.6542) — NOT Broughton Cricket Club, NOT Normanby Hall Cricket Club.
 
         Reply ONLY with a valid JSON object with these keys:
         - "step_1_visual_clues": the clue inventory, with in-scene text (including reconstructed partially occluded signs) and overlay text listed separately.
@@ -85,10 +86,11 @@ class LocationRepository(
         4. Commit to a location only when one candidate survives and is consistent with the visible signage.
 
         ANTI-BIAS & ANTI-ANCHORING RULES:
-        - NEVER guess Brigg, Barton-upon-Humber, Scunthorpe, or North Lincolnshire unless the specific landmarks below or explicit signs for those towns are visible in the image.
+        - ANTI-ANCHORING RULE: Do not default to "Brigg", "Market Place, Brigg", "Barton-upon-Humber", or "Scunthorpe" without visual evidence. However, if a sign or banner in the image explicitly shows "SCUNTHORPE" or the "01724" area code, actively use that clue to identify the exact venue in Scunthorpe.
         - Standishgate, Wigan: If the background shows a dark sign reading "GLAMOUR POINT" (partially behind a pole) on the left and a modern canopy shopfront reading "RWHOPE" ("Rebuild with Hope") on the right on a pedestrianised street with black bollards on yellow base plates, it is "Standishgate, Wigan" (25-27 Standishgate, Wigan, Greater Manchester, WN1 1UE, latitude 53.5474, longitude -2.6306) — eliminate Brigg and Scunthorpe.
         - Buttercross, Brigg: ONLY when an 18th-century arched Buttercross with a clock turret, octagonal bandstand, and mock-Tudor gables is visible, identify as "The Buttercross, Brigg" (latitude 53.5526, longitude -0.4896).
         - Central Surgery, Barton-upon-Humber: ONLY when a red-brick medical practice with orange clay pantile roofs, upper bay/oriel windows, and a black BT KX100 phone box is visible, identify as "Central Surgery, Barton-upon-Humber" (latitude 53.6838, longitude -0.4400).
+        - Heslam Park Scoreboard (Scunthorpe Town Cricket Club): A two-storey dark vertical-timber-clad cricket scoreboard building with a pitched tiled roof above a red-brick ground-floor wall, displaying orange/yellow lettering "BAT | TOTAL | BAT", "LAST WKT | WKTS | LAST BAT", and "1st INNS | OVERS", or a "JT MOTORS SCUNTHORPE" ("01724 855255") banner on the brick wall below, is "Heslam Park Scoreboard, Scunthorpe" at Scunthorpe Town Cricket Club, "Heslam Park, Ashby Road", "Scunthorpe", "North Lincolnshire", postcode "DN16 2AG", "United Kingdom" (latitude 53.5775, longitude -0.6542) — NOT Broughton Cricket Club, NOT Normanby Hall Cricket Club.
 
         You MUST reply with ONLY a valid JSON object with exactly these keys:
         {"step_1_candidate_towns": string, "step_2_elimination": string, "title": string, "description": string, "confidence": "high" or "medium" or "low", "latitude": number, "longitude": number, "city": string, "region": string, "country": string}
@@ -443,6 +445,19 @@ class LocationRepository(
 
         val identification = normalize("${result.title} ${result.street.orEmpty()} ${result.searchQuery.orEmpty()}")
         val city = result.city?.let(::normalize)
+
+        // Heslam Park Scoreboard / Scunthorpe Town Cricket Club
+        val isHeslamPark = identification.contains("heslampark") ||
+            identification.contains("scunthorpetowncricket") ||
+            identification.contains("jtmotors")
+        if (isHeslamPark) {
+            return ResolvedLocation(
+                point = GeoPoint(53.5775, -0.6542),
+                source = "Verified Venue (Heslam Park, Ashby Road, Scunthorpe)",
+                isApproximate = false,
+                displayAddress = "Heslam Park, Ashby Road, Scunthorpe, DN16 2AG"
+            )
+        }
 
         // Standishgate, Wigan (Glamour Point at 27 Standishgate & Rebuild with Hope / RWHOPE at 25 Standishgate)
         val isStandishgateWigan = identification.contains("glamourpoint") ||

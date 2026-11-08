@@ -39,5 +39,6 @@ data class LocationUiState(
     val loadingProgress: LoadingProgressState = LoadingProgressState(),
     val crossCheckDialog: CrossCheckDialogState = CrossCheckDialogState(),
     val isCameraOverlayVisible: Boolean = false,
+    val isResultCardMinimized: Boolean = false,
     val toastMessage: String? = null
 )

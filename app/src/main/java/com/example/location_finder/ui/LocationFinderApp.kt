@@ -179,10 +179,20 @@ fun LocationFinderApp(
                     .padding(start = 16.dp, top = 8.dp, end = 16.dp)
             )
 
-            // Floating Map Controls (Zoom in, Zoom out, Recenter)
+            // Floating Map Controls (Zoom in, Zoom out, Recenter, Open Google Maps)
             FloatingMapControls(
                 mapView = mapViewInstance,
                 resolvedLocation = uiState.resolvedLocation,
+                onOpenGoogleMaps = {
+                    uiState.resolvedLocation?.let { resolved ->
+                        openInGoogleMaps(
+                            context,
+                            resolved.point.latitude,
+                            resolved.point.longitude,
+                            uiState.resolvedTitle
+                        )
+                    }
+                },
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .statusBarsPadding()
@@ -202,6 +212,8 @@ fun LocationFinderApp(
                         title = uiState.resolvedTitle,
                         description = uiState.resolvedDescription,
                         confidence = uiState.lastGeminiResult?.confidence,
+                        isMinimized = uiState.isResultCardMinimized,
+                        onToggleMinimize = { viewModel.toggleResultCardMinimize() },
                         onOpenMapsClick = {
                             openInGoogleMaps(
                                 context,
@@ -357,23 +369,22 @@ fun OSMMapViewport(
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                     this.title = disputed.title
                     snippet = disputed.snippet
+                    setOnMarkerClickListener { _, _ ->
+                        onOpenMapsClick(disputed.point.latitude, disputed.point.longitude, disputed.title)
+                        true
+                    }
                 }
 
                 if (existing != null && existing.position != disputed.point) {
                     mapView.overlays.add(secondMarker)
-                    val points = listOf(existing.position, disputed.point)
-                    val centerLat = points.map { it.latitude }.average()
-                    val centerLon = points.map { it.longitude }.average()
-                    mapView.controller.animateTo(GeoPoint(centerLat, centerLon))
-                    val spanDeg = maxOf(
-                        kotlin.math.abs(existing.position.latitude - disputed.point.latitude),
-                        kotlin.math.abs(existing.position.longitude - disputed.point.longitude),
-                        0.02
-                    )
-                    mapView.controller.setZoom((20.0 - kotlin.math.log10(spanDeg * 111.0) / kotlin.math.log10(2.0)).coerceIn(4.0, 17.0))
+                    // Center on the newly promoted resolvedLocation so the user sees the verified spot clearly
+                    val targetPoint = resolvedLocation?.point ?: disputed.point
+                    mapView.controller.animateTo(targetPoint)
+                    mapView.controller.setZoom(16.0)
                 } else {
                     mapView.overlays.add(secondMarker)
                     mapView.controller.animateTo(disputed.point)
+                    mapView.controller.setZoom(16.0)
                 }
             }
 
@@ -478,6 +489,7 @@ fun ModernTopHeader(modifier: Modifier = Modifier) {
 fun FloatingMapControls(
     mapView: MapView?,
     resolvedLocation: ResolvedLocation?,
+    onOpenGoogleMaps: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -511,6 +523,15 @@ fun FloatingMapControls(
             ) {
                 Icon(Icons.Default.LocationOn, contentDescription = "Center on location")
             }
+            SmallFloatingActionButton(
+                onClick = onOpenGoogleMaps,
+                containerColor = Color(0xFF003344),
+                contentColor = Color(0xFF00E5FF),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.border(1.dp, Color(0xFF00E5FF), RoundedCornerShape(10.dp))
+            ) {
+                Icon(Icons.Default.Navigation, contentDescription = "Open in Google Maps")
+            }
         }
     }
 }
@@ -521,6 +542,8 @@ fun ResolvedLocationCard(
     title: String?,
     description: String?,
     confidence: String?,
+    isMinimized: Boolean,
+    onToggleMinimize: () -> Unit,
     onOpenMapsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -535,10 +558,11 @@ fun ResolvedLocationCard(
         )
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = if (isMinimized) 10.dp else 16.dp)
         ) {
             Row(
-                verticalAlignment = Alignment.Top
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Surface(
                     color = Color(0xFF003B19),
@@ -556,85 +580,90 @@ fun ResolvedLocationCard(
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "[ TARGET ACQUIRED ]",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00E5FF)
-                        )
-                        confidence?.let { conf ->
-                            val (bgColor, txtColor, label) = when (conf.lowercase()) {
-                                "high" -> Triple(Color(0xFF003B19), Color(0xFF00FF66), "[ CONF: HIGH ]")
-                                "medium" -> Triple(Color(0xFF4A3B00), Color(0xFFFFD700), "[ CONF: MED ]")
-                                else -> Triple(Color(0xFF4A0000), Color(0xFFFF3333), "[ CONF: LOW ]")
-                            }
-                            Surface(
-                                color = bgColor,
-                                shape = RoundedCornerShape(6.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, txtColor.copy(alpha = 0.6f))
-                            ) {
-                                Text(
-                                    text = label,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = txtColor,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "[ TARGET ACQUIRED ]",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF00E5FF)
+                    )
                     Text(
                         text = title ?: "Location Found",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = Color(0xFFD0F8E0)
+                        color = Color(0xFFD0F8E0),
+                        maxLines = if (isMinimized) 1 else 2,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "[ NET_NODE: ${resolvedLocation.source} ]",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF00FF66)
+                }
+
+                // Quick Google Maps launch button when card is minimized
+                if (isMinimized) {
+                    IconButton(
+                        onClick = onOpenMapsClick,
+                        modifier = Modifier
+                            .padding(end = 4.dp)
+                            .size(36.dp)
+                            .background(Color(0xFF00FF66), RoundedCornerShape(8.dp))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Navigation,
+                            contentDescription = "Open in Google Maps",
+                            tint = Color(0xFF00220B),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                // Minimize / Expand toggle button
+                IconButton(onClick = onToggleMinimize) {
+                    Icon(
+                        imageVector = if (isMinimized) Icons.Default.Add else Icons.Default.Remove,
+                        contentDescription = if (isMinimized) "Expand card" else "Minimize card",
+                        tint = Color(0xFF00FF66)
                     )
                 }
             }
 
-            description?.takeIf { it.isNotBlank() }?.let { desc ->
-                Spacer(modifier = Modifier.height(8.dp))
+            if (!isMinimized) {
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = desc,
+                    text = "[ NET_NODE: ${resolvedLocation.source} ]",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFD0F8E0).copy(alpha = 0.85f),
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
+                    color = Color(0xFF00FF66)
                 )
-            }
 
-            Spacer(modifier = Modifier.height(12.dp))
-            Button(
-                onClick = onOpenMapsClick,
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF00FF66),
-                    contentColor = Color(0xFF00220B)
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Navigation,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = stringResource(R.string.open_in_google_maps),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                description?.takeIf { it.isNotBlank() }?.let { desc ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = desc,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFD0F8E0).copy(alpha = 0.85f),
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onOpenMapsClick,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF00FF66),
+                        contentColor = Color(0xFF00220B)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Navigation,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.open_in_google_maps),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }

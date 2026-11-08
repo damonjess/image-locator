@@ -64,6 +64,10 @@ class LocationSearchViewModel(
         _uiState.update { it.copy(isCameraOverlayVisible = false) }
     }
 
+    fun toggleResultCardMinimize() {
+        _uiState.update { it.copy(isResultCardMinimized = !it.isResultCardMinimized) }
+    }
+
     fun clearToastMessage() {
         _uiState.update { it.copy(toastMessage = null) }
     }
@@ -250,6 +254,23 @@ class LocationSearchViewModel(
                 }
 
                 LocationCrossCheck.Verdict.DISPUTED -> {
+                    updateProgress(85, "Resolving candidate coordinates…")
+                    val resolved = repository.resolveLocation(candidate)
+                    if (resolved != null) {
+                        plotOnMap(resolved, candidate.title, candidate.description)
+                    } else if (crossCheckOutcome.secondPassPoint != null) {
+                        val secondTitle = crossCheckOutcome.secondPassTitle ?: "Verified Location"
+                        plotOnMap(
+                            ResolvedLocation(
+                                point = crossCheckOutcome.secondPassPoint,
+                                source = "Second analysis verify",
+                                isApproximate = false,
+                                displayAddress = secondTitle
+                            ),
+                            secondTitle,
+                            crossCheckOutcome.eliminationReasoning ?: "Identified by second verification pass."
+                        )
+                    }
                     updateProgress(100, "Review required")
                     showCrossCheckDialog(crossCheckOutcome, candidate)
                 }
@@ -325,13 +346,30 @@ class LocationSearchViewModel(
     }
 
     fun compareDisputedCandidateOnMap(point: GeoPoint, title: String) {
+        val currentResolved = _uiState.value.resolvedLocation
+        val currentTitle = _uiState.value.resolvedTitle ?: "First guess"
+        val currentOutcome = _uiState.value.crossCheckDialog.outcome
+
+        // Promote the second guess to the active resolvedLocation so the Target Acquired card
+        // and the [ OPEN IN GOOGLE MAPS ] button appear immediately for the verified place.
         _uiState.update {
             it.copy(
-                disputedCandidate = DisputedCandidateMarker(
+                resolvedLocation = ResolvedLocation(
                     point = point,
-                    title = "⚠️ $title",
-                    snippet = "Second analysis candidate — compare with the existing pin"
-                )
+                    source = "Verified 2nd Analysis",
+                    isApproximate = false,
+                    displayAddress = title
+                ),
+                resolvedTitle = title,
+                resolvedDescription = currentOutcome?.eliminationReasoning
+                    ?: "Selected from second independent analysis.",
+                disputedCandidate = currentResolved?.let { prev ->
+                    DisputedCandidateMarker(
+                        point = prev.point,
+                        title = "1st guess: $currentTitle",
+                        snippet = "Initial candidate — tap pin to open in Google Maps"
+                    )
+                }
             )
         }
         dismissCrossCheckDialog()

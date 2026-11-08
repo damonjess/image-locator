@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">Cyber Locator</string>
     <string name="select_photo_from_gallery">Select Photo Matrix</string>
-    <string name="open_in_google_maps">[ ACCESS MAP MATRIX ]</string>
+    <string name="open_in_google_maps">[ OPEN IN GOOGLE MAPS ]</string>
     <string name="brand_title">CYBER_LOCATOR</string>
     <string name="home_headline">TARGET RECONNAISSANCE</string>
     <string name="home_subtitle">Feed visual data matrix to resolve target location.</string>
