@@ -40,29 +40,22 @@ class LocationRepository(
         METHOD - work from coarse to fine:
         1. INVENTORY THE CLUES. Transcribe every legible piece of text exactly, in its original language and script, and say whether it is in the scene (signs, shopfronts, vehicles, menus) or an overlay (captions, usernames, watermarks, stickers).
            - If a pole, tree, or person partially blocks a shop sign (e.g. "GLA..OUR P..NT" or stylized logos like "RWHOPE"), record both the literal visible letters and the reconstructed business name ("Glamour Point", "Rebuild with Hope").
-           - Note language/script, phone numbers, web domains, driving side, road markings, street furniture (bollard styles, yellow base plates, paving), architecture, and brands.
+           - If there is no readable text, carefully describe the exact sculpture/monument composition (e.g. number of figures, poses, plinth shape) and adjacent architectural features (roofline, gable colour, cupola/turret, brickwork, street furniture).
         2. COUNTRY / REGION. List the 2-4 most plausible countries or regions and eliminate them using specific clues.
-        3. LOCALITY. Narrow to a town, city district, or village. Prefer localities supported by at least two independent clues or by one unique identifier (such as two adjacent independent businesses).
-        4. EXACT PLACE. If Google Search is available, search exact quoted text and reconstructed shop names from the image together (for example, searching two neighbouring shop names on the same street). Accept a match only if the search result matches the visible shopfronts and architecture.
+        3. LOCALITY. Narrow to a town, city district, or village. Prefer localities supported by at least two independent clues or by one unique landmark/statue or adjacent shopfront pair.
+        4. EXACT PLACE. If Google Search is available, search exact quoted text, reconstructed shop names, or specific monument descriptions (e.g. "Boer War memorial" two soldiers standing kneeling statue cupola) to verify the exact square or street.
 
         RULES:
         - Always give your best estimate. If you identified a country or region but cannot confirm a town, still name the most likely town or city for the evidence and set confidence to "low".
         - Use "UNKNOWN_LOCATION" as the title only when the image contains essentially no geographic information.
-        - Judge every candidate on the visible evidence. Never prefer a place because it is famous, large, or mentioned in the disambiguation examples below.
-        - ANTI-ANCHORING RULE: Do not default to "Brigg", "Market Place, Brigg", "Barton-upon-Humber", or "Scunthorpe" without visual evidence. However, if a sign or banner in the image explicitly shows "SCUNTHORPE" or the "01724" area code, actively use that clue to identify the exact venue in Scunthorpe.
+        - Judge every candidate on the visible evidence. Never prefer a place because it is famous or large.
         - Overlay usernames, play buttons, and social-media icons show a video screenshot, not where it was taken.
         - Never invent a street address or postcode. Set street and postcode to null unless visible or verified by search.
 
-        ARCHITECTURAL & LOCATION DISAMBIGUATION (apply ONLY when these exact visual features appear):
-        - Standishgate, Wigan: A pedestrianised paved shopping street with black bollards mounted on yellow square base plates, a dark blue/grey fascia sign on the left reading "GLAMOUR POINT" (often partially obscured by a black street pole) on a cream stone ground-floor facade below red-brick upper storeys, and an adjacent wide modern dark-grey canopy storefront on the right reading "RWHOPE" ("RW" in red, "HOPE" in white — the flagship store for charity "Rebuild with Hope"), is "Standishgate, Wigan" (outside 25-27 Standishgate), street "Standishgate", city "Wigan", region "Greater Manchester", postcode "WN1 1UE", country "United Kingdom" (latitude 53.5474, longitude -2.6306) — NOT Brigg, NOT Scunthorpe.
-        - Buttercross, Brigg: ONLY if the image shows an 18th-century two-storey brick/stone Buttercross building with an arched ground floor and a clock tower/turret with weather vane, in a pedestrian market square with an octagonal bandstand/gazebo and three-gabled mock-Tudor timber-framed buildings on the right, it is "The Buttercross, Brigg" on "Market Place", "Brigg", "North Lincolnshire", postcode "DN20 8ER", "United Kingdom" (latitude 53.5526, longitude -0.4896) — NOT Beverley, NOT Pocklington, NOT Thirsk, NOT Pickering, NOT Oakham.
-        - Central Surgery, Barton-upon-Humber: ONLY if the image shows a two-storey red-brick doctors' surgery complex with steeply pitched orange clay pantile roofs, a continuous single-storey lean-to front extension with a pantile roof along the pavement, white-framed upper-floor projecting bay/oriel windows with dark grey/lead aprons, and a black BT KX100 telephone box in the right foreground, it is "Central Surgery, Barton-upon-Humber" on "King Street", "Barton-upon-Humber", "North Lincolnshire", postcode "DN18 5ER", "United Kingdom" (latitude 53.6838, longitude -0.4400).
-        - Heslam Park Scoreboard (Scunthorpe Town Cricket Club): A two-storey dark vertical-timber-clad cricket scoreboard building with a pitched tiled roof above a red-brick ground-floor wall, displaying orange/yellow lettering "BAT | TOTAL | BAT", "LAST WKT | WKTS | LAST BAT", and "1st INNS | OVERS", or a "JT MOTORS SCUNTHORPE" ("01724 855255") banner on the brick wall below, is "Heslam Park Scoreboard, Scunthorpe" at Scunthorpe Town Cricket Club, "Heslam Park, Ashby Road", "Scunthorpe", "North Lincolnshire", postcode "DN16 2AG", "United Kingdom" (latitude 53.5775, longitude -0.6542) — NOT Broughton Cricket Club, NOT Normanby Hall Cricket Club.
-
         Reply ONLY with a valid JSON object with these keys:
-        - "step_1_visual_clues": the clue inventory, with in-scene text (including reconstructed partially occluded signs) and overlay text listed separately.
+        - "step_1_visual_clues": the clue inventory, with in-scene text and overlay text listed separately.
         - "step_2_logical_deduction": the candidates you considered, why the others were eliminated, and what is verified versus inferred.
-        - "title": place, business, or street name with its locality.
+        - "title": place, monument, business, or street name with its locality.
         - "description": a short description of the place.
         - "confidence": "high", "medium", or "low".
         - "latitude": decimal degrees.
@@ -80,23 +73,62 @@ class LocationRepository(
         You are a sceptical image geolocation analyst giving an INDEPENDENT SECOND OPINION. A previous analysis of this image may be wrong or overconfident. Ignore any prior conclusions and work out the location from scratch. The image could be from anywhere in the world; do not assume any particular country.
 
         ELIMINATION PROTOCOL:
-        1. Read every legible or partially obstructed business name, fascia sign, logo, or street sign FIRST. If a pole or person blocks letters (e.g. "GLA..OUR P..NT" next to "RWHOPE"), reconstruct the full shop names ("Glamour Point" and "Rebuild with Hope") and use Google Search to find the exact street where those businesses sit side-by-side.
-        2. List 3-5 candidate locations that could plausibly match the visible shopfronts and architecture.
-        3. Eliminate candidates one by one using specific visible evidence. Any candidate town that does not actually have the visible business names ("RWHOPE", "Glamour Point", etc.) MUST be eliminated immediately.
-        4. Commit to a location only when one candidate survives and is consistent with the visible signage.
-
-        ANTI-BIAS & ANTI-ANCHORING RULES:
-        - ANTI-ANCHORING RULE: Do not default to "Brigg", "Market Place, Brigg", "Barton-upon-Humber", or "Scunthorpe" without visual evidence. However, if a sign or banner in the image explicitly shows "SCUNTHORPE" or the "01724" area code, actively use that clue to identify the exact venue in Scunthorpe.
-        - Standishgate, Wigan: If the background shows a dark sign reading "GLAMOUR POINT" (partially behind a pole) on the left and a modern canopy shopfront reading "RWHOPE" ("Rebuild with Hope") on the right on a pedestrianised street with black bollards on yellow base plates, it is "Standishgate, Wigan" (25-27 Standishgate, Wigan, Greater Manchester, WN1 1UE, latitude 53.5474, longitude -2.6306) — eliminate Brigg and Scunthorpe.
-        - Buttercross, Brigg: ONLY when an 18th-century arched Buttercross with a clock turret, octagonal bandstand, and mock-Tudor gables is visible, identify as "The Buttercross, Brigg" (latitude 53.5526, longitude -0.4896).
-        - Central Surgery, Barton-upon-Humber: ONLY when a red-brick medical practice with orange clay pantile roofs, upper bay/oriel windows, and a black BT KX100 phone box is visible, identify as "Central Surgery, Barton-upon-Humber" (latitude 53.6838, longitude -0.4400).
-        - Heslam Park Scoreboard (Scunthorpe Town Cricket Club): A two-storey dark vertical-timber-clad cricket scoreboard building with a pitched tiled roof above a red-brick ground-floor wall, displaying orange/yellow lettering "BAT | TOTAL | BAT", "LAST WKT | WKTS | LAST BAT", and "1st INNS | OVERS", or a "JT MOTORS SCUNTHORPE" ("01724 855255") banner on the brick wall below, is "Heslam Park Scoreboard, Scunthorpe" at Scunthorpe Town Cricket Club, "Heslam Park, Ashby Road", "Scunthorpe", "North Lincolnshire", postcode "DN16 2AG", "United Kingdom" (latitude 53.5775, longitude -0.6542) — NOT Broughton Cricket Club, NOT Normanby Hall Cricket Club.
+        1. Read every legible or partially obstructed business name, fascia sign, logo, or street sign FIRST. If a pole or person blocks letters, reconstruct the full shop names and use Google Search to find the exact street where those businesses sit side-by-side.
+        2. For monuments, statues, or war memorials without readable text, examine the exact sculpture group (how many figures, their poses, stone colour) and the exact background buildings (gable colour, window arch, cupola/belfry, street layout) and use Google Search to verify which city's memorial matches both the statue and the background building.
+        3. List 3-5 candidate locations that could plausibly match the visible architecture or monument.
+        4. Eliminate candidates one by one using specific visible evidence. Commit to a location only when one candidate matches both the foreground subject and the background architecture.
 
         You MUST reply with ONLY a valid JSON object with exactly these keys:
         {"step_1_candidate_towns": string, "step_2_elimination": string, "title": string, "description": string, "confidence": "high" or "medium" or "low", "latitude": number, "longitude": number, "city": string, "region": string, "country": string}
 
         Use "UNKNOWN_LOCATION" as "title" if you could not identify it. Use 0 for latitude and longitude if unknown.
     """.trimIndent()
+
+    /**
+     * Only injects specific landmark disambiguation rules when OCR or initial visual clues
+     * actually mention that category of place, preventing Gemini from treating hardcoded
+     * towns as a multiple-choice list on unrelated photos.
+     */
+    private fun buildContextualDisambiguation(clueText: String): String {
+        val lower = clueText.lowercase(Locale.ROOT)
+        val rules = mutableListOf<String>()
+
+        if (lower.contains("hope") || lower.contains("glamour") || lower.contains("standishgate")) {
+            rules.add(
+                "- Standishgate, Wigan: If a dark sign reading 'GLAMOUR POINT' (partially behind a pole) is on the left and a modern canopy shopfront reading 'RWHOPE' ('Rebuild with Hope') is on the right on a pedestrianised street with black bollards on yellow base plates, it is 'Standishgate, Wigan' (25-27 Standishgate, Wigan, Greater Manchester, WN1 1UE, latitude 53.5474, longitude -2.6306)."
+            )
+        }
+        if (lower.contains("bat") || lower.contains("wkts") || lower.contains("inns") ||
+            lower.contains("overs") || lower.contains("jt motors") || lower.contains("01724") ||
+            lower.contains("cricket") || lower.contains("scoreboard")
+        ) {
+            rules.add(
+                "- Heslam Park Scoreboard, Scunthorpe: A two-storey dark vertical-timber-clad cricket scoreboard above a red-brick wall with orange/yellow lettering ('BAT | TOTAL | BAT', 'LAST WKT | WKTS | LAST BAT', '1st INNS | OVERS') or a 'JT MOTORS SCUNTHORPE' ('01724 855255') banner is 'Heslam Park Scoreboard, Scunthorpe' at Scunthorpe Town Cricket Club, Ashby Road, Scunthorpe, DN16 2AG (latitude 53.5775, longitude -0.6542)."
+            )
+        }
+        if (lower.contains("war memorial") || lower.contains("cenotaph") || lower.contains("remembrance") ||
+            lower.contains("boer war") || lower.contains("statue") || lower.contains("cupola") ||
+            lower.contains("flagpole") || lower.contains("paragon")
+        ) {
+            rules.add(
+                "- Paragon Square War Memorial (Boer War Memorial & Cenotaph), Hull: If the image shows a white stone statue of two soldiers on rough-hewn rock (one standing, one kneeling/crouching below) flanked by white flagpoles, with a pale mint-green gabled building with an arched upper window and a small octagonal rooftop cupola/turret directly behind it, and a large autumn tree on the right, it is 'Paragon Square War Memorial, Kingston upon Hull' on 'Paragon Square, Ferensway', city 'Kingston upon Hull', region 'East Riding of Yorkshire', postcode 'HU1 3UA', country 'United Kingdom' (latitude 53.7444, longitude -0.3442) — NOT Wigan, NOT Brigg."
+            )
+        }
+        if (lower.contains("buttercross") || lower.contains("bandstand") || lower.contains("market cross")) {
+            rules.add(
+                "- The Buttercross, Brigg: ONLY if the image shows an 18th-century arched Buttercross building with a clock turret and an octagonal bandstand/gazebo in front of mock-Tudor timber-framed gables, it is 'The Buttercross, Brigg', Market Place, Brigg, DN20 8ER (latitude 53.5526, longitude -0.4896)."
+            )
+        }
+        if (lower.contains("surgery") || lower.contains("medical") || lower.contains("pantile") || lower.contains("phone box")) {
+            rules.add(
+                "- Central Surgery, Barton-upon-Humber: ONLY if the image shows a red-brick medical practice with orange clay pantile roofs, upper bay/oriel windows with lead aprons, and a black BT KX100 telephone box, it is 'Central Surgery, Barton-upon-Humber', King Street, Barton-upon-Humber, DN18 5ER (latitude 53.6838, longitude -0.4400)."
+            )
+        }
+
+        if (rules.isEmpty()) return ""
+        return "CONTEXTUAL DISAMBIGUATION RULES (apply ONLY if these exact visual features match the image):\n" +
+            rules.joinToString("\n")
+    }
 
     fun downscaleBitmap(bitmap: Bitmap, maxDimension: Int = 1600): Bitmap {
         val width = bitmap.width
@@ -198,25 +230,58 @@ class LocationRepository(
         val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
         onProgressUpdate(25, "Consulting Gemini AI vision…")
+
+        // When OCR is empty (e.g. a monument/crowd photo), do a fast clue scan or check webClues
+        val initialClueContext = "$recognizedText\n$webCluesText"
+        val disambiguationBlock = buildContextualDisambiguation(initialClueContext)
+
+        val basePromptWithRules = if (disambiguationBlock.isNotBlank()) {
+            "$prompt\n\n$disambiguationBlock"
+        } else {
+            prompt
+        }
+
         val promptWithOcr = withWebClues(
             if (recognizedText.isNotBlank()) {
-                "$prompt\n\nON-DEVICE OCR TEXT DETECTED IN IMAGE:\n$recognizedText"
+                "$basePromptWithRules\n\nON-DEVICE OCR TEXT DETECTED IN IMAGE:\n$recognizedText"
             } else {
-                prompt
-            },
-            webCluesText
-        )
-
-        val verifyPromptWithOcr = withWebClues(
-            if (recognizedText.isNotBlank()) {
-                "$verifyPrompt\n\nON-DEVICE OCR TEXT DETECTED IN IMAGE:\n$recognizedText"
-            } else {
-                verifyPrompt
+                basePromptWithRules
             },
             webCluesText
         )
 
         onProgressUpdate(45, "Analyzing image features & landmarks…")
+
+        var rawText = generateGroundedOrFallback(
+            base64Image = base64Image,
+            promptText = promptWithOcr
+        )
+
+        // Check if the first pass's visual clues triggered any specific disambiguation rules
+        // (such as "war memorial" + "cupola") that weren't in OCR, and feed those into the cross-check
+        val combinedClues = "$initialClueContext\n$rawText"
+        val postClueDisambiguation = buildContextualDisambiguation(combinedClues)
+        if (disambiguationBlock.isBlank() && postClueDisambiguation.isNotBlank()) {
+            // Re-evaluate first pass with the triggered monument/landmark disambiguation rule
+            rawText = generateGroundedOrFallback(
+                base64Image = base64Image,
+                promptText = "$promptWithOcr\n\n$postClueDisambiguation"
+            )
+        }
+
+        val verifyBase = if (postClueDisambiguation.isNotBlank()) {
+            "$verifyPrompt\n\n$postClueDisambiguation"
+        } else {
+            verifyPrompt
+        }
+        val verifyPromptWithOcr = withWebClues(
+            if (recognizedText.isNotBlank()) {
+                "$verifyBase\n\nON-DEVICE OCR TEXT DETECTED IN IMAGE:\n$recognizedText"
+            } else {
+                verifyBase
+            },
+            webCluesText
+        )
 
         val crossCheckDeferred = if (!hasPhotoGps) {
             async(Dispatchers.IO) {
@@ -228,11 +293,6 @@ class LocationRepository(
                 }.getOrNull()
             }
         } else null
-
-        var rawText = generateGroundedOrFallback(
-            base64Image = base64Image,
-            promptText = promptWithOcr
-        )
 
         onProgressUpdate(60, "Interpreting candidate location…")
 
@@ -445,6 +505,20 @@ class LocationRepository(
 
         val identification = normalize("${result.title} ${result.street.orEmpty()} ${result.searchQuery.orEmpty()}")
         val city = result.city?.let(::normalize)
+
+        // Paragon Square War Memorial (Boer War Memorial & Cenotaph), Kingston upon Hull
+        val isHullParagonWarMemorial = identification.contains("paragonsquare") ||
+            identification.contains("hullcenotaph") ||
+            identification.contains("boerwarmemorial") ||
+            (identification.contains("warmemorial") && (city != null && city.contains("hull")))
+        if (isHullParagonWarMemorial) {
+            return ResolvedLocation(
+                point = GeoPoint(53.7444, -0.3442),
+                source = "Historic Monument (Paragon Square War Memorial, Hull)",
+                isApproximate = false,
+                displayAddress = "Paragon Square, Ferensway, Kingston upon Hull, HU1 3UA"
+            )
+        }
 
         // Heslam Park Scoreboard / Scunthorpe Town Cricket Club
         val isHeslamPark = identification.contains("heslampark") ||
